@@ -6,3 +6,4 @@ gds/**/*.gltf
 
 .DS_Store
 results.xml
+docs/*.md
