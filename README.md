@@ -389,4 +389,18 @@ Updates I want to make in the future to improve the design, anyone else is welco
 - [ ] Optimize control flow and use of registers to improve cycle time
 - [ ] Write a basic graphics kernel or add simple graphics hardware to demonstrate graphics functionality
 
+# Recent Changes (Feb 2026)
+
+Significant improvements have been made to the synthesis and verification flow:
+
+- **Logic Fixes**:
+    - Fixed a critical race condition in the block dispatcher where blocks were being skipped.
+    - Fixed Verilog syntax errors (trailing commas, type mismatches) to support stricter tools.
+    - Converted incorrect `reg` outputs to `wire` in structural modules.
+- **Verification**:
+    - Updated test bench helper scripts (`format.py`, `setup.py`) to be compatible with `cocotb` 2.0+.
+    - Added PowerShell scripts (`build.ps1`, `test_matadd.ps1`, `test_matmul.ps1`) for seamless building and testing on Windows.
+- **Tooling**:
+    - Added support for `sv2v` on Windows for SystemVerilog to Verilog conversion.
+
 **For anyone curious to play around or make a contribution, feel free to put up a PR with any improvements you'd like to add 😄**
