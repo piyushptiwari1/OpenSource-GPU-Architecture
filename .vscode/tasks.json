@@ -26,7 +26,11 @@
     {
       "label": "Build: compile full design",
       "type": "shell",
-      "command": "make compile",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && make compile"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -36,7 +40,11 @@
     {
       "label": "Build: compile alu",
       "type": "shell",
-      "command": "make compile_alu",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_alu"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -46,7 +54,11 @@
     {
       "label": "Build: compile controller",
       "type": "shell",
-      "command": "make compile_controller",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_controller"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -56,7 +68,11 @@
     {
       "label": "Build: compile core",
       "type": "shell",
-      "command": "make compile_core",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_core"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -66,7 +82,11 @@
     {
       "label": "Build: compile dcr",
       "type": "shell",
-      "command": "make compile_dcr",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_dcr"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -76,7 +96,11 @@
     {
       "label": "Build: compile decoder",
       "type": "shell",
-      "command": "make compile_decoder",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_decoder"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -86,7 +110,11 @@
     {
       "label": "Build: compile dispatch",
       "type": "shell",
-      "command": "make compile_dispatch",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_dispatch"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -96,7 +124,11 @@
     {
       "label": "Build: compile fetcher",
       "type": "shell",
-      "command": "make compile_fetcher",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_fetcher"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -106,7 +138,11 @@
     {
       "label": "Build: compile gpu",
       "type": "shell",
-      "command": "make compile_gpu",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_gpu"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -116,7 +152,11 @@
     {
       "label": "Build: compile lsu",
       "type": "shell",
-      "command": "make compile_lsu",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_lsu"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -126,7 +166,11 @@
     {
       "label": "Build: compile pc",
       "type": "shell",
-      "command": "make compile_pc",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_pc"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -136,7 +180,11 @@
     {
       "label": "Build: compile registers",
       "type": "shell",
-      "command": "make compile_registers",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_registers"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -146,7 +194,11 @@
     {
       "label": "Build: compile scheduler",
       "type": "shell",
-      "command": "make compile_scheduler",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make compile_scheduler"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -156,7 +208,11 @@
     {
       "label": "Test: matadd",
       "type": "shell",
-      "command": "make test_matadd",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && make test_matadd"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -166,12 +222,103 @@
     {
       "label": "Test: matmul",
       "type": "shell",
-      "command": "make test_matmul",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && make test_matmul"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
       "dependsOn": "Setup: create build directory",
       "problemMatcher": []
+    },
+    {
+      "label": "Debug: matadd (debugpy wait)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && COCOTB_DEBUGPY=1 COCOTB_DEBUGPY_WAIT=1 COCOTB_DEBUGPY_HOST=127.0.0.1 COCOTB_DEBUGPY_PORT=5678 make test_matadd"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Setup: create build directory",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "cocotb-debug",
+        "pattern": [
+          {
+            "regexp": ".+",
+            "file": 1,
+            "location": 1,
+            "message": 1
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "endsPattern": "\\[cocotb-debug\\] Waiting for debugger attach on .*"
+        }
+      }
+    },
+    {
+      "label": "Debug: matmul (debugpy wait)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && COCOTB_DEBUGPY=1 COCOTB_DEBUGPY_WAIT=1 COCOTB_DEBUGPY_HOST=127.0.0.1 COCOTB_DEBUGPY_PORT=5678 make test_matmul"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Setup: create build directory",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "cocotb-debug",
+        "pattern": [
+          {
+            "regexp": ".+",
+            "file": 1,
+            "location": 1,
+            "message": 1
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "endsPattern": "\\[cocotb-debug\\] Waiting for debugger attach on .*"
+        }
+      }
+    },
+    {
+      "label": "Debug: selected cocotb module (debugpy wait)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && COCOTB_DEBUGPY=1 COCOTB_DEBUGPY_WAIT=1 COCOTB_DEBUGPY_HOST=127.0.0.1 COCOTB_DEBUGPY_PORT=5678 MODULE=${input:cocotbModule} make test_matadd"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Setup: create build directory",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "cocotb-debug",
+        "pattern": [
+          {
+            "regexp": ".+",
+            "file": 1,
+            "location": 1,
+            "message": 1
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "endsPattern": "\\[cocotb-debug\\] Waiting for debugger attach on .*"
+        }
+      }
     },
     {
       "label": "Logs: show latest test log path",
@@ -211,6 +358,18 @@
         "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "cocotbModule",
+      "type": "pickString",
+      "description": "Select the cocotb test module to run under debugpy",
+      "options": [
+        "test.test_matadd",
+        "test.test_matmul"
+      ],
+      "default": "test.test_matadd"
     }
   ]
 }

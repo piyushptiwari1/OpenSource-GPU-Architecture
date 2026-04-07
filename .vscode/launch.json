@@ -8,7 +8,7 @@
       "runtimeExecutable": "bash",
       "args": [
         "-lc",
-        "make test_matadd"
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && make test_matadd"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
@@ -22,12 +22,79 @@
       "runtimeExecutable": "bash",
       "args": [
         "-lc",
-        "make test_matmul"
+        "rm -f build/gpu.v build/temp.v build/sim.vvp && ulimit -n 4096 && make test_matmul"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
       "preLaunchTask": "Setup: create build directory"
+    },
+    {
+      "name": "Attach: cocotb debugpy (5678)",
+      "type": "python",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "justMyCode": false,
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "${workspaceFolder}"
+        }
+      ]
+    },
+    {
+      "name": "Debug Python cocotb: matadd",
+      "type": "python",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "justMyCode": false,
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "${workspaceFolder}"
+        }
+      ],
+      "preLaunchTask": "Debug: matadd (debugpy wait)"
+    },
+    {
+      "name": "Debug Python cocotb: matmul",
+      "type": "python",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "justMyCode": false,
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "${workspaceFolder}"
+        }
+      ],
+      "preLaunchTask": "Debug: matmul (debugpy wait)"
+    },
+    {
+      "name": "Debug Python cocotb: selected module",
+      "type": "python",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "justMyCode": false,
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "${workspaceFolder}"
+        }
+      ],
+      "preLaunchTask": "Debug: selected cocotb module (debugpy wait)"
     },
     {
       "name": "Run helper: latest test log path",
