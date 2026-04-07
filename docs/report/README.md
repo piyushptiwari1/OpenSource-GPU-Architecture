@@ -9,6 +9,8 @@ This directory contains a source-verified documentation set for the `tiny-gpu` r
 - `02-architecture-and-execution.md` — hardware organization, execution stages, and key module relationships
 - `03-build-and-test-workflow.md` — compile flow, cocotb harness behavior, and simulator/tooling references
 - `04-risks-open-questions.md` — confirmed limitations, documentation mismatches, and roadmap boundaries
+- `05-matadd-trace-walkthrough.md` — cycle-by-cycle guided reading of the matrix-addition execution log
+- `06-matmul-trace-walkthrough.md` — cycle-by-cycle guided reading of the matrix-multiplication execution log
 
 ## Method
 
