@@ -1,0 +1,30 @@
+modules = ["python-3.12"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+packages = ["ghdl", "swig", "verilog"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Run Simulation"
+
+[[workflows.workflow]]
+name = "Run Simulation"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "export PATH=\"/home/runner/.local/bin:/home/runner/workspace/.pythonlibs/bin:$PATH\"; make test_matadd && make test_matmul"
+
+[workflows.workflow.metadata]
+outputType = "console"

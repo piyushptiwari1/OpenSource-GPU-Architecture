@@ -1,11 +1,16 @@
 .PHONY: test compile
 
 export LIBPYTHON_LOC=$(shell cocotb-config --libpython)
+export COCOTB_LIB_DIR=$(shell cocotb-config --lib-dir)
+LIBPYTHON_DIR=$(shell dirname $(shell cocotb-config --libpython))
 
 test_%:
 	make compile
 	iverilog -o build/sim.vvp -s gpu -g2012 build/gpu.v
-	MODULE=test.test_$* vvp -M $$(cocotb-config --prefix)/cocotb/libs -m libcocotbvpi_icarus build/sim.vvp
+	PYGPI_PYTHON_BIN=$$(cocotb-config --python-bin) \
+	LD_LIBRARY_PATH="$(LIBPYTHON_DIR):$$LD_LIBRARY_PATH" \
+	COCOTB_TEST_MODULES=test.test_$* \
+	vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/sim.vvp
 
 compile:
 	make compile_alu
