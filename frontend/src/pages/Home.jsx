@@ -72,25 +72,30 @@ export default function Home() {
         >
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,var(--border-color)_1px,transparent_1px)] bg-[size:24px_24px] opacity-20" />
           
-          <div className="relative w-64 h-64 border-2 border-[var(--accent-cyan)] rounded-xl bg-[var(--bg-dark)] shadow-[0_0_40px_var(--accent-cyan-glow)] flex items-center justify-center">
+          <div className="relative w-64 h-64 border-2 border-[var(--accent-cyan)] rounded-xl bg-[var(--bg-dark)] shadow-[0_0_40px_var(--accent-cyan-glow)] flex items-center justify-center overflow-hidden">
+             {/* spinning orbit ring */}
              <motion.div 
                animate={{ rotate: 360 }}
                transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-               className="w-48 h-48 border border-dashed border-[var(--accent-purple)] rounded-full absolute"
+               className="w-44 h-44 border border-dashed border-[var(--accent-purple)] rounded-full absolute opacity-60"
              />
-             <Cpu size={64} className="text-[var(--text-heading)]" />
-             
-             {[0, 90, 180, 270].map((deg, i) => (
-                <motion.div 
+             {/* chip icon — pure outlines, no fills */}
+             <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 24 24"
+               style={{fill: 'none', stroke: 'rgba(255,255,255,0.75)', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round', zIndex: 2, position: 'relative'}}>
+               <rect x="4" y="4" width="16" height="16" rx="2" style={{fill:'none'}}/>
+               <line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/>
+               <line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/>
+               <line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/>
+               <line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>
+             </svg>
+             {/* corner accent dots — positioned at fixed corners, not center */}
+             {[['8px','8px'], ['8px','auto'], ['auto','8px'], ['auto','auto']].map(([t, b, l, r], i) => (
+                <motion.div
                   key={i}
-                  className="absolute w-3 h-3 bg-[var(--accent-cyan)] rounded-full shadow-[0_0_10px_var(--accent-cyan)]"
-                  style={{
-                    top: '50%',
-                    left: '50%',
-                    transform: `translate(-50%, -50%) rotate(${deg}deg) translateY(-140px)`
-                  }}
-                  animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
-                  transition={{ duration: 2, repeat: Infinity, delay: i * 0.5 }}
+                  className="absolute w-2 h-2 bg-[var(--accent-cyan)] rounded-full"
+                  style={{ top: t === 'auto' ? 'auto' : t, bottom: b, left: [l,'8px','8px','auto'][i] === 'auto' ? 'auto' : [l,'8px','8px','auto'][i], right: i >= 2 ? '8px' : 'auto' }}
+                  animate={{ opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.45 }}
                 />
              ))}
           </div>

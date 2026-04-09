@@ -65,6 +65,11 @@ button {
   -webkit-text-fill-color: transparent;
 }
 
+/* Chip icon: prevent any inherited fill from coloring the SVG */
+.chip-icon-clean, .chip-icon-clean * {
+  fill: none !important;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
