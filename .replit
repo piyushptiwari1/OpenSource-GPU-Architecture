@@ -41,12 +41,12 @@ outputType = "console"
 name = "Backend API"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "export PATH=\"/home/runner/.local/bin:/home/runner/workspace/.pythonlibs/bin:$PATH\" && python server.py"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "mkdir -p /home/runner/.local/bin && ([ -f /home/runner/.local/bin/sv2v ] || (curl -fsSL https://github.com/zachjs/sv2v/releases/download/v0.0.12/sv2v-Linux.zip -o /tmp/sv2v.zip && unzip -o /tmp/sv2v.zip -d /tmp/sv2v_out && cp /tmp/sv2v_out/sv2v-Linux/sv2v /home/runner/.local/bin/sv2v && chmod +x /home/runner/.local/bin/sv2v)) && export PATH=\"/home/runner/.local/bin:/home/runner/workspace/.pythonlibs/bin:$PATH\" && python server.py"
 
 [[workflows.workflow]]
 name = "Start application"
