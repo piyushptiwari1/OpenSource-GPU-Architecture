@@ -68,5 +68,10 @@ externalPort = 80
 localPort = 5001
 externalPort = 3001
 
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
 [deployment]
-deploymentTarget = "cloudrun"
+deploymentTarget = "vm"
+run = ["bash", "start.sh"]

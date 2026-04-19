@@ -1,11 +1,15 @@
+import os
 import subprocess
 import threading
 import time
 import re
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory, send_file
 from flask_cors import CORS
 
-app = Flask(__name__)
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+IS_PRODUCTION = os.environ.get("REPLIT_DEPLOYMENT") == "1" or not os.environ.get("REPL_SLUG") is None
+
+app = Flask(__name__, static_folder=None)
 CORS(app)
 
 simulation_state = {
@@ -53,17 +57,14 @@ def run_simulation_task(test_name):
         stripped = line.strip()
         log_lines.append(stripped)
 
-        # Count cycles from cocotb output
         if "ns INFO" in stripped or "ns WARNING" in stripped or "ns ERROR" in stripped:
             cycles += 1
 
-        # Check for completion
         if "passed" in stripped.lower() and "test." in stripped.lower():
             simulation_state["passed"] = True
         if "failed" in stripped.lower() and "test." in stripped.lower():
             simulation_state["passed"] = False
 
-        # Extract sim time
         m = re.search(r"(\d+[\d.]*)\s+ns\s+INFO.*cocotb.regression.*completed", stripped, re.IGNORECASE)
         if not m:
             m = re.search(r"PASS\s+([\d.]+)", stripped)
@@ -229,5 +230,18 @@ def get_memory_hierarchy():
     })
 
 
+# Serve React frontend static files (production)
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    dist = FRONTEND_DIST
+    if path and os.path.exists(os.path.join(dist, path)):
+        return send_from_directory(dist, path)
+    return send_from_directory(dist, "index.html")
+
+
 if __name__ == "__main__":
-    app.run(host="localhost", port=8000, debug=False)
+    port = int(os.environ.get("PORT", 8080))
+    host = "0.0.0.0"
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(host=host, port=port, debug=debug)
