@@ -6,8 +6,8 @@ import re
 from flask import Flask, jsonify, request, send_from_directory, send_file
 from flask_cors import CORS
 
-FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
-IS_PRODUCTION = os.environ.get("REPLIT_DEPLOYMENT") == "1" or not os.environ.get("REPL_SLUG") is None
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
 
 app = Flask(__name__, static_folder=None)
 CORS(app)
@@ -48,7 +48,7 @@ def run_simulation_task(test_name):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd="/home/runner/workspace",
+        cwd=BASE_DIR,
     )
 
     cycles = 0
