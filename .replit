@@ -79,3 +79,4 @@ externalPort = 8081
 [deployment]
 deploymentTarget = "vm"
 run = ["bash", "start.sh"]
+build = ["bash", "build.sh"]
