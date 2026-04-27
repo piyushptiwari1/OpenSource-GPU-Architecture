@@ -15,7 +15,7 @@ test_%:
 	iverilog -o build/sim.vvp -s gpu -g2012 build/gpu.v -s iverilog_dump_$* iverilog_dump_$*.sv
 	cd test && mkdir -p runs
 	cd ..
-	COCOTB_TEST_MODULES=test.test_$* vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/sim.vvp -fst > test/runs/test_$*_$(TIMESTAMP).out
+	COCOTB_TEST_MODULES=$(if $(MODULE),$(MODULE),test.test_$*) vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/sim.vvp -fst > test/runs/test_$*_$(TIMESTAMP).out
 
 compile:
 	mkdir -p build
