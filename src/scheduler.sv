@@ -52,7 +52,10 @@ module scheduler #(
             core_state <= IDLE;
             done <= 0;
         end else begin 
-            case (core_state)
+            // Core FSM: states are mutually exclusive and the 3-bit encoding
+            // covers all 8 values, so `unique case` lets the synthesizer infer
+            // a clean state machine and warn on any overlap (issue #20).
+            unique case (core_state)
                 IDLE: begin
                     // Here after reset (before kernel is launched, or after previous block has been processed)
                     if (start) begin 

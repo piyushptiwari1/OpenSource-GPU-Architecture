@@ -1,6 +1,10 @@
 # Open Source GPU Architecture
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A minimal, fully open-source GPU implementation in Verilog — designed for learning how GPUs work from the ground up, all the way from architecture down to control signals.
+
+> **What's different from upstream `tiny-gpu`?** Every open community PR is integrated, and many open issues are addressed. See [CHANGES.md](CHANGES.md) for a complete map of merged PRs and resolved issues.
 
 Built with <15 files of fully documented Verilog, complete documentation on architecture & ISA, working matrix addition/multiplication kernels, and full support for kernel simulation & execution traces.
 
@@ -313,24 +317,45 @@ RET                            ; end of kernel
 
 # Simulation
 
-tiny-gpu is setup to simulate the execution of both of the above kernels. Before simulating, you'll need to install [iverilog](https://steveicarus.github.io/iverilog/usage/installation.html), [cocotb](https://docs.cocotb.org/en/stable/install.html) and [sv2v](https://github.com/zachjs/sv2v).
+OpenSource GPU Architecture is set up to simulate the execution of both of the above kernels. Before simulating, you'll need to install [iverilog](https://steveicarus.github.io/iverilog/usage/installation.html), [cocotb](https://docs.cocotb.org/en/stable/install.html) and [sv2v](https://github.com/zachjs/sv2v).
 
-- Install Verilog compilers with `brew install icarus-verilog` and `pip3 install cocotb`
-- Download the latest version of sv2v from https://github.com/zachjs/sv2v/releases, unzip it and put the binary in $PATH.
-- Run `mkdir build` in the root directory of this repository.
+### Recommended (Python virtual environment)
 
-Once you've installed the pre-requisites, you can run the kernel simulations with `make test_matadd` and `make test_matmul`.
-You can also view the waveforms using `make show_matadd` and `make show_matmul`.
+Using a virtual environment keeps cocotb and its native helpers isolated from your system Python. This is the path most likely to "just work" on Ubuntu, macOS, and WSL (resolves upstream issues #46, #43, #50).
 
-Executing the simulations will output a log file in `test/logs` with the initial data memory state, complete execution trace of the kernel, and final data memory state.
+```bash
+# 1. System tools
+sudo apt-get install -y iverilog gtkwave        # Ubuntu/Debian
+# brew install icarus-verilog gtkwave           # macOS
+
+# 2. Project Python deps in a venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install "cocotb>=2.0" pytest
+
+# 3. sv2v (download the binary for your platform from
+#    https://github.com/zachjs/sv2v/releases and put it in $PATH)
+
+# 4. Build directory
+mkdir -p build
+```
+
+Once the prerequisites are in place, run the kernel simulations with `make test_matadd` and `make test_matmul`. Open the resulting waveforms with `make show_matadd` / `make show_matmul`. Each run is logged under `test/runs/test_<kernel>_<timestamp>.out`.
+
+### Build flow notes
+
+- The default `Makefile` targets the iverilog + cocotb v2.x flow (`COCOTB_TEST_MODULES`, `cocotb-config --lib-dir`, `unit="ns"`). Tested on Ubuntu 22.04 with iverilog 11+.
+- For commercial simulators (VCS / Questa / Xcelium) use `make -f Makefile.sv ...` to drive the SystemVerilog sources directly without sv2v.
+- For full ASIC / SoC build flows (synthesis, DFT, floorplan, UPF) see `Makefile.vlsi`.
+
+Executing the simulations will output a log file with the initial data memory state, complete execution trace of the kernel, and final data memory state.
 
 If you look at the initial data memory state logged at the start of the logfile for each, you should see the two start matrices for the calculation, and in the final data memory at the end of the file you should also see the resultant matrix.
 
 Below is a sample of the execution traces, showing on each cycle the execution of every thread within every core, including the current instruction, PC, register values, states, etc.
 
 ![execution trace](docs/images/trace.png)
-
-**For anyone trying to run the simulation or play with this repo, please feel free to DM me on [twitter](https://twitter.com/majmudaradam) if you run into any issues - I want you to get this running!**
 
 ## Visualization
 

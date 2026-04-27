@@ -39,8 +39,11 @@ module alu (
                     //                        n          z           p
                     alu_out_reg <= {5'b0, (rs < rt), (rs == rt), (rs > rt)};
                 end else begin 
-                    // Execute the specified arithmetic instruction
-                    case (decoded_alu_arithmetic_mux)
+                    // Execute the specified arithmetic instruction.
+                    // ADD/SUB/MUL/DIV are mutually exclusive and the 2-bit
+                    // selector covers the full state space, so `unique case`
+                    // lets the synthesizer infer a clean 4:1 mux (issue #20).
+                    unique case (decoded_alu_arithmetic_mux)
                         ADD: begin 
                             alu_out_reg <= rs + rt;
                         end

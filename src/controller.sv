@@ -48,21 +48,27 @@ module controller #(
 
     always @(posedge clk) begin
         if (reset) begin 
-            mem_read_valid <= 0;
-            mem_read_address <= 0;
+            // Packed vector resets (driven as a single bit-vector)
+            mem_read_valid <= {NUM_CHANNELS{1'b0}};
+            mem_write_valid <= {NUM_CHANNELS{1'b0}};
+            consumer_read_ready <= {NUM_CONSUMERS{1'b0}};
+            consumer_write_ready <= {NUM_CONSUMERS{1'b0}};
 
-            mem_write_valid <= 0;
-            mem_write_address <= 0;
-            mem_write_data <= 0;
+            // Unpacked-array resets (Quartus Prime 18.1 rejects scalar-to-array
+            // shorthand, so we initialize each element explicitly).
+            // Fixes upstream issue #25.
+            for (int k = 0; k < NUM_CHANNELS; k = k + 1) begin
+                mem_read_address[k] <= {ADDR_BITS{1'b0}};
+                mem_write_address[k] <= {ADDR_BITS{1'b0}};
+                mem_write_data[k] <= {DATA_BITS{1'b0}};
+                current_consumer[k] <= 0;
+                controller_state[k] <= IDLE;
+            end
+            for (int k = 0; k < NUM_CONSUMERS; k = k + 1) begin
+                consumer_read_data[k] <= {DATA_BITS{1'b0}};
+            end
 
-            consumer_read_ready <= 0;
-            consumer_read_data <= 0;
-            consumer_write_ready <= 0;
-
-            current_consumer <= 0;
-            controller_state <= 0;
-
-            channel_serving_consumer = 0;
+            channel_serving_consumer = {NUM_CONSUMERS{1'b0}};
         end else begin 
             // Local variable to handle arbitration updates within the same cycle
             reg [NUM_CONSUMERS-1:0] next_channel_serving_consumer;
@@ -70,7 +76,10 @@ module controller #(
 
             // For each channel, we handle processing concurrently
             for (int i = 0; i < NUM_CHANNELS; i = i + 1) begin 
-                case (controller_state[i])
+                // FSM states are mutually exclusive; unique case helps the
+                // synthesizer infer a true mux and emit a warning if multiple
+                // states match (issue #20).
+                unique case (controller_state[i])
                     IDLE: begin
                         // While this channel is idle, cycle through consumers looking for one with a pending request
                         for (int j = 0; j < NUM_CONSUMERS; j = j + 1) begin 
@@ -130,6 +139,7 @@ module controller #(
                             controller_state[i] <= IDLE;
                         end
                     end
+                    default: ; // Unused encodings: hold state.
                 endcase
             end
             

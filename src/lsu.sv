@@ -49,7 +49,8 @@ module lsu (
         end else if (enable) begin
             // If memory read enable is triggered (LDR instruction)
             if (decoded_mem_read_enable) begin 
-                case (lsu_state)
+                // 4-state FSM, fully covered (issue #20).
+                unique case (lsu_state)
                     IDLE: begin
                         // Only read when core_state = REQUEST
                         if (core_state == 3'b011) begin 
@@ -79,7 +80,8 @@ module lsu (
 
             // If memory write enable is triggered (STR instruction)
             if (decoded_mem_write_enable) begin 
-                case (lsu_state)
+                // 4-state FSM, fully covered (issue #20).
+                unique case (lsu_state)
                     IDLE: begin
                         // Only read when core_state = REQUEST
                         if (core_state == 3'b011) begin 
