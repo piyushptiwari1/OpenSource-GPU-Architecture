@@ -8,3 +8,5 @@ gds/**/*.gltf
 results.xml
 
 sim_build/**
+*.vcd
+*.gtkw

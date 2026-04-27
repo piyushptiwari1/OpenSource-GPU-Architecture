@@ -43,7 +43,10 @@ iverilog_dump_%.sv:
 test.test_%: compile
 	make -f Makefile.cocotb.mk MODULE=$@
 
-show_%: %.vcd
+.SECONDEXPANSION:
+
+# A .gtkw file is optional
+show_%: %.vcd $$(wildcard $$*.gtkw)
 	gtkwave $^
 
 clean:
