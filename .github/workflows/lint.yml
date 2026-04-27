@@ -24,6 +24,168 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: ruff format (check)
+        run: ruff format --check .
+
+      - name: ruff lint
+        run: ruff check .
+
+      - name: mypy
+        # tools/ is empty in initial bootstrap; mypy must not fail the
+        # build while we are still scaffolding. Switch to `mypy tools`
+        # (no `|| true`) once tools/opengpu_tools/ has its first module.
+        run: mypy --install-types --non-interactive tools || true
+
+  systemverilog:
+    name: SystemVerilog (verible + slang)
+    runs-on: ubuntu-latest
+    env:
+      # Pin the latest stable verible release. Bump via dependabot once
+      # a release-tag bumper action is configured.
+      VERIBLE_VERSION: v0.0-4053-g89d4d98a
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install verible
+        run: |
+          set -euo pipefail
+          ARCHIVE="verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+          curl -fsSL -o /tmp/verible.tar.gz \
+            "https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/${ARCHIVE}"
+          mkdir -p /tmp/verible
+          tar -xzf /tmp/verible.tar.gz -C /tmp/verible --strip-components=1
+          sudo install -m 0755 /tmp/verible/bin/* /usr/local/bin/
+          verible-verilog-lint --version
+          verible-verilog-format --version
+
+      - name: Install pyslang (slang Python binding)
+        run: |
+          python -m pip install --upgrade pip
+          pip install "pyslang>=10.0,<11"
+          python -c "import pyslang; print('pyslang', pyslang.__version__)"
+
+      - name: List SystemVerilog sources
+        id: list
+        run: |
+          mapfile -t SV_FILES < <(git ls-files \
+            'src/**/*.sv' 'src/**/*.svh' \
+            'test/**/*.sv' 'test/**/*.svh' || true)
+          printf '%s\n' "${SV_FILES[@]}" > sv_files.txt
+          echo "count=${#SV_FILES[@]}" >> "$GITHUB_OUTPUT"
+          echo "Found ${#SV_FILES[@]} SystemVerilog files"
+          head -5 sv_files.txt || true
+
+      - name: verible-verilog-format (check; advisory)
+        if: steps.list.outputs.count != '0'
+        run: |
+          # Advisory during bootstrap: PR-55 enterprise modules and
+          # upstream files have not yet been reformatted to the new
+          # rules. This will be flipped to a hard failure in a follow-up
+          # PR (issue: "Reformat tree to verible style").
+          set +e
+          xargs -a sv_files.txt -r verible-verilog-format \
+            --flagfile=tools/lint/verible.fmt --verify
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "::warning::verible-verilog-format reported diffs (advisory)."
+          fi
+          exit 0
+
+      - name: verible-verilog-lint (advisory)
+        if: steps.list.outputs.count != '0'
+        run: |
+          # Advisory during bootstrap; promote to hard failure once the
+          # existing tree is clean.
+          set +e
+          xargs -a sv_files.txt -r verible-verilog-lint \
+            --rules_config tools/lint/verible.rules
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "::warning::verible-verilog-lint reported issues (advisory during bootstrap)."
+          fi
+          exit 0
+
+      - name: pyslang parse (advisory)
+        if: steps.list.outputs.count != '0'
+        run: |
+          # Advisory parse-only check: catches gross syntax issues and
+          # SV-LRM violations the simulator allows. Hard failure once
+          # tree is clean.
+          set +e
+          python tools/lint/pyslang_check.py $(cat sv_files.txt)
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "::warning::pyslang reported issues (advisory during bootstrap)."
+          fi
+          exit 0
+
+  metadata:
+    name: Repository metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate CITATION.cff
+        uses: citation-file-format/cffconvert-github-action@4cf11baa70a673bfdf9dad0acc7ee33b3f4b6084  # v2.0.0
+        with:
+          args: "--validate"
+
+      - name: Check required files
+        run: |
+          set -e
+          for f in LICENSE README.md CHANGES.md CONTRIBUTING.md \
+                   CODE_OF_CONDUCT.md SECURITY.md MAINTAINERS.md \
+                   CITATION.cff .env.example .editorconfig; do
+            if [ ! -f "$f" ]; then
+              echo "Missing required file: $f"
+              exit 1
+            fi
+          done
+
+      - name: Forbid committed secrets / .env
+        run: |
+          if git ls-files | grep -E '^(\.env(\.|$)|.*\.pem$|.*\.key$)' \
+              | grep -v '^\.env\.example$'; then
+            echo "Found a committed env / secret file."
+            exit 1
+          fi
+name: Lint
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (ruff + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
       - name: Install dev deps
         run: |
