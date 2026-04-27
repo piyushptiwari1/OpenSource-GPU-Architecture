@@ -52,8 +52,6 @@ sv2v-Windows.zip
 
 # Python virtual environment (Replit)
 .pythonlibs/
-pyproject.toml
-uv.lock
 
 # Frontend
 frontend/node_modules/
