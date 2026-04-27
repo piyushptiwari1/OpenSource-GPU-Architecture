@@ -2,6 +2,8 @@
 
 export LIBPYTHON_LOC=$(shell cocotb-config --libpython)
 export PYGPI_PYTHON_BIN=$(shell cocotb-config --python-bin)
+export COCOTB_LIB_DIR=$(shell cocotb-config --lib-dir)
+LIBPYTHON_DIR=$(shell dirname $(shell cocotb-config --libpython))
 
 TOPLEVEL := gpu
 TIMESTAMP := $(shell date +%Y%m%d%H%M%S)
@@ -15,7 +17,9 @@ test_%:
 	iverilog -o build/sim.vvp -s gpu -g2012 build/gpu.v -s iverilog_dump_$* iverilog_dump_$*.sv
 	cd test && mkdir -p runs
 	cd ..
-	COCOTB_TEST_MODULES=$(if $(MODULE),$(MODULE),test.test_$*) vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/sim.vvp -fst > test/runs/test_$*_$(TIMESTAMP).out
+	LD_LIBRARY_PATH="$(LIBPYTHON_DIR):$$LD_LIBRARY_PATH" \
+	COCOTB_TEST_MODULES=$(if $(MODULE),$(MODULE),test.test_$*) \
+	vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/sim.vvp -fst > test/runs/test_$*_$(TIMESTAMP).out
 
 compile:
 	mkdir -p build

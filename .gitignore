@@ -14,3 +14,12 @@ sv2v-Windows/
 sv2v-Windows.zip
 *.ps1
 *_out.txt
+
+# Python virtual environment (Replit)
+.pythonlibs/
+pyproject.toml
+uv.lock
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
