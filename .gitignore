@@ -6,7 +6,11 @@ gds/**/*.gltf
 
 .DS_Store
 results.xml
-
 sim_build/**
 *.vcd
 *.gtkw
+
+sv2v-Windows/
+sv2v-Windows.zip
+*.ps1
+*_out.txt

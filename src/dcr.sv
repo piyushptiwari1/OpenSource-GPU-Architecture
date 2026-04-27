@@ -21,25 +21,25 @@ module dcr (
     input wire [7:0] device_control_data,
 
     // Current configured total thread count for the kernel launch.
-    output wire [7:0] thread_count,
+    output wire [7:0] thread_count
 );
     // Internal storage register for the device control data.
     // `reg [7:0]` 表示定义一个 8 bit 的寄存器变量，用来跨时钟保存状态。
-    reg [7:0] device_conrol_register;
+    reg [7:0] device_control_register;
 
     // In this design, the low 8 bits directly represent the kernel's total thread count.
     // 这行没有时钟，属于组合连线：输出 thread_count 永远等于内部寄存器当前值。
-    assign thread_count = device_conrol_register[7:0];
+    assign thread_count = device_control_register[7:0];
 
     always @(posedge clk) begin
         if (reset) begin
             // Reset clears the launch configuration.
-            device_conrol_register <= 8'b0;
+            device_control_register <= 8'b0;
         end else begin
             if (device_control_write_enable) begin 
                 // Latch the new launch configuration when write_enable is high.
                 // 非阻塞赋值 `<=` 表示在这个上升沿把输入数据写进内部寄存器。
-                device_conrol_register <= device_control_data;
+                device_control_register <= device_control_data;
             end
         end
     end

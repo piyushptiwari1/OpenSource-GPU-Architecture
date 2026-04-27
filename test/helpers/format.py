@@ -99,7 +99,7 @@ def format_cycle(dut, cycle_id: int, thread_id: Optional[int] = None):
 
     for core in dut.cores:
         # Not exactly accurate, but good enough for now
-        if int(str(dut.thread_count.value), 2) <= int(core.i.value) * int(dut.THREADS_PER_BLOCK.value):
+        if int(dut.thread_count.value) <= int(core.i.value) * int(dut.THREADS_PER_BLOCK.value):
             continue
 
         logger.debug(f"\n+--------------------- Core {int(core.i.value)} ---------------------+")
