@@ -1,6 +1,6 @@
-# tiny-gpu
+# Open Source GPU Architecture
 
-A minimal GPU implementation in Verilog optimized for learning about how GPUs work from the ground up.
+A minimal, fully open-source GPU implementation in Verilog — designed for learning how GPUs work from the ground up, all the way from architecture down to control signals.
 
 Built with <15 files of fully documented Verilog, complete documentation on architecture & ISA, working matrix addition/multiplication kernels, and full support for kernel simulation & execution traces.
 
@@ -390,3 +390,11 @@ Updates I want to make in the future to improve the design, anyone else is welco
 - [ ] Write a basic graphics kernel or add simple graphics hardware to demonstrate graphics functionality
 
 **For anyone curious to play around or make a contribution, feel free to put up a PR with any improvements you'd like to add 😄**
+
+---
+
+## Credits
+
+This project is based on [**tiny-gpu**](https://github.com/adam-maj/tiny-gpu) by **[Adam Majmudar (@adam-maj)](https://github.com/adam-maj)**. All original architecture, Verilog source, ISA design, and documentation are the work of the original author. This repository preserves and builds upon that work as *Open Source GPU Architecture* for continued learning, experimentation, and community contribution.
+
+Huge thanks to **Adam Majmudar** for making GPU internals approachable to everyone. 🙏
