@@ -19,6 +19,7 @@ clean:
 	rmdir test/runs
 
 compile:
+	mkdir -p build
 	make compile_alu
 	sv2v -I src/* -w build/gpu.v
 	echo "" >> build/gpu.v
