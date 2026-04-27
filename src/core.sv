@@ -5,6 +5,19 @@
 // > Handles processing 1 block at a time
 // > The core also has it's own scheduler to manage control flow
 // > Each core contains 1 fetcher & decoder, and register files, ALUs, LSUs, PC for each thread
+//
+// Beginner notes:
+// 1. This is one of the most rewarding files to re-read in the whole design,
+//    because it stitches the shared control path and the per-thread datapath together.
+// 2. `fetcher`, `decoder`, and `scheduler` are instantiated once per core, while
+//    `registers`, `alu`, `lsu`, and `pc` are replicated once per thread lane.
+// 3. Read declarations like `wire [7:0] next_pc [THREADS_PER_BLOCK-1:0];` in two parts:
+//    each element is 8 bits, and there are `THREADS_PER_BLOCK` elements in total.
+// 4. `generate for (...) begin : threads` is NOT a runtime loop; it tells the
+//    synthesizer to replicate the hardware structures inside it at elaboration time.
+// 5. If you are new to Verilog, treat this module as a wiring diagram first --
+//    follow the signal names to see how submodules connect to each other before
+//    trying to reason cycle-by-cycle.
 module core #(
     parameter DATA_MEM_ADDR_BITS = 8,
     parameter DATA_MEM_DATA_BITS = 8,
@@ -40,11 +53,13 @@ module core #(
     input [THREADS_PER_BLOCK-1:0] data_mem_write_ready
 );
     // State
+    // These signals are shared across the entire core: every active lane sees them.
     reg [2:0] core_state;
     reg [2:0] fetcher_state;
     reg [15:0] instruction;
 
     // Intermediate Signals
+    // The next PC, source operands, and LSU state are kept per thread lane.
     reg [7:0] current_pc;
     wire [7:0] next_pc[THREADS_PER_BLOCK-1:0];
     reg [7:0] rs[THREADS_PER_BLOCK-1:0];
@@ -52,7 +67,6 @@ module core #(
     reg [1:0] lsu_state[THREADS_PER_BLOCK-1:0];
     reg [7:0] lsu_out[THREADS_PER_BLOCK-1:0];
     wire [7:0] alu_out[THREADS_PER_BLOCK-1:0];
-    
     // Decoded Instruction Signals
     reg [3:0] decoded_rd_address;
     reg [3:0] decoded_rs_address;
@@ -129,6 +143,8 @@ module core #(
     );
 
     // Dedicated ALU, LSU, registers, & PC unit for each thread this core has capacity for
+    // `genvar i; generate for (...)` tells the compiler to instantiate several
+    // nearly-identical submodule copies, one per thread lane.
     genvar i;
     generate
         for (i = 0; i < THREADS_PER_BLOCK; i = i + 1) begin : threads
@@ -136,6 +152,8 @@ module core #(
             alu alu_instance (
                 .clk(clk),
                 .reset(reset),
+                // `i < thread_count` disables the surplus lanes in a partially-
+                // filled tail block.
                 .enable(i < thread_count),
                 .core_state(core_state),
                 .decoded_alu_arithmetic_mux(decoded_alu_arithmetic_mux),
@@ -207,6 +225,10 @@ module core #(
                 .current_pc(current_pc),
                 .next_pc(next_pc[i])
             );
+            // Note on SIMD control flow: each lane is allowed to compute its own
+            // `next_pc`, but in this simplified GPU the scheduler ultimately keeps
+            // a single shared PC for the whole block. Branch divergence is
+            // therefore not yet handled here.
         end
     endgenerate
 endmodule

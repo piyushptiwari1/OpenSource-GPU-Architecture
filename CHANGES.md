@@ -19,7 +19,7 @@ on the upstream repository and addresses a number of open issues.
 | #51 | Interactive Digital visualization (`visualization/*.dig`) | merged |
 | #52 | Synthesis, logic, and verification fixes | merged |
 | #53 | ALU `nzp` swap + unsigned subtract overflow fix | merged |
-| #54 | Beginner-friendly RTL docs + VS Code workflows | merged (English-only; Chinese-language additions removed) |
+| #54 | Beginner-friendly RTL docs + VS Code workflows | merged (Chinese-language commentary translated to English; original technical content preserved) |
 | #55 | Production SoC / enterprise modules / CI / VLSI flows | merged (preserved as additions; base RTL kept compatible) |
 | #56 | Frontend (web visualization) | merged |
 

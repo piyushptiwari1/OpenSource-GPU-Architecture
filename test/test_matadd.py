@@ -5,10 +5,21 @@ from .helpers.memory import Memory
 from .helpers.format import format_cycle
 from .helpers.logger import logger
 
+# This test verifies that the "vector add" kernel runs correctly. The flow is:
+#   1. Pre-load program memory and data memory.
+#   2. Start the GPU simulation.
+#   3. Drive the software memory model and log internal state every cycle.
+#   4. Wait for `dut.done` to go high.
+#   5. Compare the final data memory contents against the expected results.
 @cocotb.test()
+# `@cocotb.test()` is a decorator that tells cocotb the following coroutine is
+# a test entry point.
 async def test_matadd(dut):
-    # Program Memory
+    # Program Memory -- this is the *Python* program memory model used by the
+    # testbench, not a real SRAM in the RTL.
     program_memory = Memory(dut=dut, addr_bits=8, data_bits=16, channels=1, name="program")
+    # Each entry in `program` is a 16-bit instruction whose layout matches
+    # `decoder.sv`.
     program = [
         0b0101000011011110, # MUL R0, %blockIdx, %blockDim
         0b0011000000001111, # ADD R0, R0, %threadIdx         ; i = blockIdx * blockDim + threadIdx
@@ -25,16 +36,19 @@ async def test_matadd(dut):
         0b1111000000000000, # RET                            ; end of kernel
     ]
 
-    # Data Memory
+    # Data Memory -- 8 bits wide with 4 parallel access channels, matching the
+    # GPU top-level parameters.
     data_memory = Memory(dut=dut, addr_bits=8, data_bits=8, channels=4, name="data")
     data = [
         0, 1, 2, 3, 4, 5, 6, 7, # Matrix A (1 x 8)
         0, 1, 2, 3, 4, 5, 6, 7  # Matrix B (1 x 8)
     ]
 
-    # Device Control
+    # Device Control -- vector add launches 8 threads, one per element.
     threads = 8
 
+    # `setup()` handles clock, reset, memory pre-loading, DCR programming and
+    # raising `start` in one call.
     await setup(
         dut=dut,
         program_memory=program_memory,
@@ -44,16 +58,25 @@ async def test_matadd(dut):
         threads=threads
     )
 
+    # Print the initial memory contents so the log can be diffed against the
+    # final state.
     data_memory.display(24)
 
     cycles = 0
+    # `dut.done` is the GPU top-level output asserted when the kernel has
+    # finished executing.
     while dut.done.value != 1:
+        # Each cycle, advance the Python data/program memory models so they
+        # respond to whatever read/write requests the RTL is issuing.
         data_memory.run()
         program_memory.run()
 
+        # `ReadOnly()` waits until all RTL updates for the current simulation
+        # time have settled, so the log captures stable signal values.
         await cocotb.triggers.ReadOnly()
         format_cycle(dut, cycles)
-        
+
+        # Finally wait for the rising edge of clk to advance to the next cycle.
         await RisingEdge(dut.clk)
         cycles += 1
 
