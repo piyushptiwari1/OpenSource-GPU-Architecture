@@ -9,6 +9,12 @@ results.xml
 sim_build/**
 *.vcd
 *.gtkw
+*.fst
+*.lxt
+*.lxt2
+*.vvp
+*.log
+dump.vcd
 
 sv2v-Windows/
 sv2v-Windows.zip
@@ -23,3 +29,21 @@ uv.lock
 # Frontend
 frontend/node_modules/
 frontend/dist/
+
+# Python virtual environment
+.venv/
+venv/
+env/
+*.pyc
+*.pyo
+
+# IDE and editor files
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
