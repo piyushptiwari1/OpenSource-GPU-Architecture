@@ -1,0 +1,42 @@
+# YAML 1.2
+cff-version: 1.2.0
+title: OpenSource-GPU-Architecture
+message: >-
+  If you use this software in academic work, please cite both the
+  original tiny-gpu by Adam Majmudar and this fork.
+type: software
+authors:
+  - given-names: Adam
+    family-names: Majmudar
+    affiliation: Original tiny-gpu author
+  - given-names: Piyush
+    family-names: Tiwari
+    affiliation: OpenSource-GPU-Architecture maintainer
+    alias: piyushptiwari1
+repository-code: 'https://github.com/piyushptiwari1/OpenSource-GPU-Architecture'
+url: 'https://github.com/piyushptiwari1/OpenSource-GPU-Architecture'
+abstract: >-
+  A minimal but production-oriented open-source GPU written in
+  SystemVerilog. Forked from adam-maj/tiny-gpu with all upstream pull
+  requests merged, expanded cocotb verification, and a fully open
+  RTL-to-GDS flow built on Yosys, OpenROAD, and the SkyWater 130 nm
+  PDK.
+keywords:
+  - gpu
+  - gpgpu
+  - systemverilog
+  - simt
+  - opensource-hardware
+  - risc-v-adjacent
+  - openlane
+  - yosys
+  - cocotb
+license: MIT
+references:
+  - type: software
+    title: tiny-gpu
+    authors:
+      - given-names: Adam
+        family-names: Majmudar
+    url: 'https://github.com/adam-maj/tiny-gpu'
+    license: MIT

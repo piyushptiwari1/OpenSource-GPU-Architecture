@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security advisory
+    url: https://github.com/piyushptiwari1/OpenSource-GPU-Architecture/security/advisories/new
+    about: Report a security issue privately (see SECURITY.md).
+  - name: GitHub Discussions
+    url: https://github.com/piyushptiwari1/OpenSource-GPU-Architecture/discussions
+    about: Open-ended questions, architecture discussions, integration plans.

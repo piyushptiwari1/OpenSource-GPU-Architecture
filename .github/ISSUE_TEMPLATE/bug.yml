@@ -1,0 +1,69 @@
+name: Bug report
+description: A defect in RTL, simulation, build, or tooling
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please complete the fields below so we
+        can reproduce the issue quickly.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / tag
+      description: Output of `git rev-parse HEAD` or release tag.
+      placeholder: d35a2ed
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: false
+      options:
+        - RTL (src/)
+        - Simulation (cocotb / iverilog / verilator)
+        - Formal (SymbiYosys)
+        - Open ASIC flow (OpenLane2)
+        - Open FPGA flow (Yosys + nextpnr)
+        - Toolchain (tools/)
+        - CI (.github/workflows)
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands. Paste output if useful.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: tools
+    attributes:
+      label: Toolchain versions
+      description: Output of `iverilog -V`, `verilator --version`, `python --version`, `pip show cocotb | grep Version`.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 22.04 / macOS 14.3 / Windows 11 + WSL2"
+    validations:
+      required: true

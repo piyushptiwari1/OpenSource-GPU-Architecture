@@ -1,0 +1,41 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+        args: ["--ignore-words-list=parm,nd,inout,wee,iff,thru"]
+        exclude: |
+          (?x)^(
+              vlsi/.*|
+              flow/commercial/.*|
+              docs/cocotb-overview\.md
+          )$
+
+  - repo: local
+    hooks:
+      - id: verible-format-check
+        name: verible-verilog-format (check only)
+        entry: bash -c 'command -v verible-verilog-format >/dev/null && verible-verilog-format --flagfile=tools/lint/verible.fmt --verify $(git diff --cached --name-only --diff-filter=ACMR | grep -E "\.(sv|svh|v|vh)$") || echo "verible not installed; skipping (CI will catch this)"'
+        language: system
+        pass_filenames: false

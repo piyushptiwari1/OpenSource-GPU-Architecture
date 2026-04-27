@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose a new feature or RFC
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem does this solve? Who benefits?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Concrete design. For ISA / microarchitecture changes, sketch the encoding / state machine and list affected modules.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope of change
+      options:
+        - Additive (new module / opcode / flag)
+        - Refactor (no externally visible change)
+        - Breaking (ISA / build interface)
+    validations:
+      required: true
+  - type: checkboxes
+    id: prereqs
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I have searched existing issues / discussions for duplicates.
+        - label: I have read CONTRIBUTING.md and the integration plan in /memories/repo/11-component-integration-plan.md.

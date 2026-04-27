@@ -1,0 +1,21 @@
+# Default reviewer for everything
+*                              @piyushptiwari1
+
+# Build / CI
+/.github/                      @piyushptiwari1
+/Makefile*                     @piyushptiwari1
+
+# RTL
+/src/                          @piyushptiwari1
+
+# Verification
+/test/                         @piyushptiwari1
+/sim/                          @piyushptiwari1
+/formal/                       @piyushptiwari1
+
+# Flows
+/flow/                         @piyushptiwari1
+
+# ISA spec (single source of truth)
+/docs/isa/                     @piyushptiwari1
+/tools/codegen/                @piyushptiwari1

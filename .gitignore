@@ -8,6 +8,35 @@ gds/**/*.gltf
 results.xml
 sim_build/**
 *.vcd
+*.fst
+*.ghw
+
+# Local environment & tool caches
+.env
+.env.local
+.envrc
+.venv/
+.tox/
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Generated artifacts
+flow/openlane2/runs/
+flow/fpga/**/build/
+bench/results/
+site/
+
+# Editor / IDE
+*.swp
+*.swo
+.idea/
+*.code-workspace
+
 *.gtkw
 *.fst
 *.lxt

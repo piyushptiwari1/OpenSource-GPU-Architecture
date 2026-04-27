@@ -1,0 +1,20 @@
+name: Question
+description: Ask a usage / design question
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For real-time discussion, prefer GitHub Discussions if enabled.
+        For security issues see SECURITY.md instead.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What you have already tried / read.

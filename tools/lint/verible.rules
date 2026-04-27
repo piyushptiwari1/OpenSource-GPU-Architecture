@@ -1,0 +1,58 @@
+# Verible lint rules for OpenSource-GPU-Architecture.
+#
+# Rule list mirrors the OpenTitan / Caliptra style guide and the
+# lowRISC SystemVerilog Style Guide. Rules are switched on (+) or off
+# (-). Run with:
+#
+#   verible-verilog-lint --rules_config tools/lint/verible.rules src/**/*.sv
+#
+# References:
+#   https://chipsalliance.github.io/verible/lint.html
+#   https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md
+
+# ---- Naming ------------------------------------------------------------
++module-filename
++package-filename
++parameter-name-style=localparam_style:CamelCase;parameter_style:CamelCase
++macro-name-style
++enum-name-style
++typedef-structs-unions
++struct-union-name-style
+
+# ---- Style -------------------------------------------------------------
++line-length=length:100
++no-tabs
++no-trailing-spaces
++posix-eof
++suggest-parentheses
++forbid-line-continuations
++truncated-numeric-literal
+
+# ---- Safety ------------------------------------------------------------
++always-comb
++always-comb-blocking
++always-ff-non-blocking
++case-missing-default
++explicit-begin
++explicit-function-lifetime
++explicit-task-lifetime
++explicit-parameter-storage-type
++explicit-function-task-parameter-type
++forbid-defparam
++forbid-consecutive-null-statements
++generate-label
++generate-label-prefix
++legacy-generate-syntax
++mismatched-labels
++packed-dimensions-range-ordering
++positive-meaning-parameter-name
++proper-parameter-declaration
++signal-name-style
++undersized-binary-literal
++unpacked-dimensions-range-ordering
+
+# ---- Disabled (intentional, with reason) -------------------------------
+# Many existing modules use lowercase parameters; relax until refactor
+-parameter-name-style
+# Allow `unique case` without explicit default if priority encoder
+# semantics are documented (we still want default for safety).
