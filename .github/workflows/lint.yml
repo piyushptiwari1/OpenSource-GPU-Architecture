@@ -73,7 +73,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "pyslang>=10.0,<11"
-          python -c "import pyslang; print('pyslang', pyslang.__version__)"
+          python -c "import pyslang; print('pyslang import OK')"
 
       - name: List SystemVerilog sources
         id: list
@@ -155,7 +155,14 @@ jobs:
 
       - name: Forbid committed secrets / .env
         run: |
-          if git ls-files | grep -E '^(\.env(\.|$)|.*\.pem$|.*\.key$)' \
-              | grep -v '^\.env\.example$'; then
-            echo "Found a committed env / secret file."
+          set -e
+          # List tracked files matching .env / .pem / .key, excluding the
+          # committed schema (.env.example).
+          tracked=$(git ls-files \
+            | grep -E '^(\.env(\.|$)|.*\.pem$|.*\.key$)' \
+            | grep -vE '^\.env\.example$' || true)
+          if [ -n "$tracked" ]; then
+            echo "::error::Found a committed env / secret file:"
+            echo "$tracked"
             exit 1
+          fi
