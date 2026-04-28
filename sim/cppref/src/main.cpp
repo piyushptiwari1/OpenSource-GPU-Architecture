@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -26,6 +28,7 @@ struct Args {
     std::filesystem::path program;
     std::filesystem::path data;     // optional
     std::filesystem::path trace;    // optional
+    std::filesystem::path mem_dump; // optional: dump final memory as hex
     int  threads   = 1;
     int  blocks    = 1;
     int  max_steps = 100000;
@@ -49,10 +52,12 @@ struct Args {
         else if (s == "--blocks")  { auto v = next("--blocks");  if (!v) return false; a.blocks  = std::atoi(v); }
         else if (s == "--max-steps") { auto v = next("--max-steps"); if (!v) return false; a.max_steps = std::atoi(v); }
         else if (s == "--mem-size")  { auto v = next("--mem-size");  if (!v) return false; a.mem_size  = std::atoi(v); }
+        else if (s == "--mem-dump")  { auto v = next("--mem-dump");  if (!v) return false; a.mem_dump  = v; }
         else if (s == "-h" || s == "--help") {
             std::cout << "Usage: opengpu-refsim --program FILE "
                          "[--data FILE] [--threads N] [--blocks N] "
-                         "[--trace FILE] [--max-steps N] [--mem-size N]\n";
+                         "[--trace FILE] [--mem-dump FILE] "
+                         "[--max-steps N] [--mem-size N]\n";
             return false;
         }
         else { std::cerr << "unknown arg: " << s << "\n"; return false; }
@@ -93,6 +98,15 @@ int main(int argc, char** argv) {
             };
             opengpu::ref::Core core(cfg, program, mem);
             total_retired += core.run(trace.get());
+        }
+
+        if (!a.mem_dump.empty()) {
+            std::ofstream md(a.mem_dump, std::ios::out | std::ios::trunc);
+            if (!md) { std::cerr << "cannot open mem-dump file\n"; return 1; }
+            md << std::hex << std::setfill('0');
+            for (auto byte : mem.raw()) {
+                md << std::setw(2) << static_cast<int>(byte) << '\n';
+            }
         }
 
         std::cout << "retired_instructions=" << total_retired << "\n";

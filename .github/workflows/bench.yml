@@ -1,0 +1,133 @@
+name: Benchmarks
+
+# Runs the bench/ kernel suite end-to-end through opengpu-refsim, validating
+# each kernel's final memory state against its host-side golden model.
+#
+# Pipeline:
+#   1. Build the C++ reference simulator (sim/cppref).
+#   2. Assemble each bench/kernels/<name>/kernel.asm via tools.asm.asm.
+#   3. Run refsim with --mem-dump and verify against host.golden().
+#   4. Upload bench/results/results.json + per-kernel artefacts.
+#
+# Also runs unit tests for tools/asm and tools/tinygrad_opengpu so
+# regressions in the in-house assembler or the elementwise codegen are
+# caught here rather than only at downstream call sites.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bench/**"
+      - "tools/asm/**"
+      - "tools/tinygrad_opengpu/**"
+      - "sim/cppref/**"
+      - "docs/isa/instructions.yaml"
+      - ".github/workflows/bench.yml"
+  pull_request:
+    paths:
+      - "bench/**"
+      - "tools/asm/**"
+      - "tools/tinygrad_opengpu/**"
+      - "sim/cppref/**"
+      - "docs/isa/instructions.yaml"
+      - ".github/workflows/bench.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  asm-and-codegen-tests:
+    name: pytest (asm + tinygrad codegen)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python deps
+        run: pip install "pyyaml>=6.0" pytest
+
+      - name: pytest tools/asm
+        run: python -m pytest tools/asm/tests -q
+
+      - name: pytest tools/tinygrad_opengpu (skips refsim e2e here)
+        run: python -m pytest tools/tinygrad_opengpu/tests -q
+
+  bench-run:
+    name: bench/run_all.py
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: asm-and-codegen-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build + Python deps
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build cmake
+          pip install "pyyaml>=6.0" pytest
+
+      - name: Build refsim (Release)
+        working-directory: sim/cppref
+        run: |
+          set -euo pipefail
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j --target opengpu-refsim
+
+      - name: Run bench suite
+        run: |
+          set -euo pipefail
+          python -m bench.run_all
+          test -f bench/results/results.json
+          echo "## Benchmark results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat bench/results/results.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: tinygrad codegen e2e (with built refsim)
+        run: python -m pytest tools/tinygrad_opengpu/tests -q
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: |
+            bench/results/results.json
+            build/bench/**/*.hex
+
+  bench-status:
+    name: Benchmarks status
+    runs-on: ubuntu-24.04
+    needs: [asm-and-codegen-tests, bench-run]
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          set -euo pipefail
+          a='${{ needs.asm-and-codegen-tests.result }}'
+          b='${{ needs.bench-run.result }}'
+          echo "asm-and-codegen-tests: $a"
+          echo "bench-run:             $b"
+          if [ "$a" != "success" ] || [ "$b" != "success" ]; then
+            echo "::error::benchmark suite failed"
+            exit 1
+          fi

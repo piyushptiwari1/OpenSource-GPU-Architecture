@@ -118,6 +118,17 @@ ignore = [
 # (number of records compared).
 "tools/difftest/__init__.py" = ["S603"]
 "tools/difftest/tests/**" = ["PLR2004"]
+# bench/run_all.py drives the trusted in-tree refsim with paths
+# constructed from the workspace; not user input. Same exemption applies
+# to the tinygrad-opengpu end-to-end test which invokes the same binary.
+"bench/run_all.py" = ["S603", "PLW2901"]
+"tools/tinygrad_opengpu/tests/**" = ["S603", "PLR2004"]
+"tools/asm/tests/**" = ["PLR2004"]
+# The assembler is a single-pass translator: a switch on instruction type
+# makes more sense than a strategy class for 4 op types. Magic ints in
+# bit-field offsets are part of the ISA encoding spec, not arbitrary.
+"tools/asm/asm.py" = ["PLR0912", "PLR0915", "PLR2004"]
+"tools/tinygrad_opengpu/codegen.py" = ["PLR2004"]
 
 [tool.ruff.format]
 quote-style = "double"
