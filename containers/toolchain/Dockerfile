@@ -76,8 +76,24 @@ RUN set -eu; \
     rm /tmp/verible.tgz; \
     ls /opt/verible/bin
 
+# ---------- 3b. sv2v ----------
+FROM verible AS sv2v
+
+ARG SV2V_VERSION
+
+RUN test -n "${SV2V_VERSION}" || (echo "SV2V_VERSION build-arg required" >&2; exit 1)
+
+RUN set -eu; \
+    URL="https://github.com/zachjs/sv2v/releases/download/${SV2V_VERSION}/sv2v-Linux.zip"; \
+    echo "Fetching ${URL}"; \
+    curl -fsSL --retry 5 --retry-delay 5 -o /tmp/sv2v.zip "${URL}"; \
+    unzip -q /tmp/sv2v.zip -d /tmp/sv2v-extract; \
+    install -Dm0755 /tmp/sv2v-extract/sv2v-Linux/sv2v /usr/local/bin/sv2v; \
+    rm -rf /tmp/sv2v.zip /tmp/sv2v-extract; \
+    sv2v --version
+
 # ---------- 4. py : Python tooling ----------
-FROM verible AS py
+FROM sv2v AS py
 
 ARG PYTHON_VERSION
 

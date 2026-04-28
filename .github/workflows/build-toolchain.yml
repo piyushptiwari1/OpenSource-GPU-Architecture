@@ -50,6 +50,7 @@ jobs:
             echo "oss_cad_suite_arch=${OSS_CAD_SUITE_ARCH}"
             echo "oss_cad_suite_sha256=${OSS_CAD_SUITE_SHA256:-}"
             echo "verible_version=${VERIBLE_VERSION}"
+            echo "sv2v_version=${SV2V_VERSION}"
             echo "python_version=${PYTHON_VERSION}"
             echo "image=${TOOLCHAIN_IMAGE}"
           } >> "$GITHUB_OUTPUT"
@@ -96,6 +97,7 @@ jobs:
             OSS_CAD_SUITE_ARCH=${{ steps.versions.outputs.oss_cad_suite_arch }}
             OSS_CAD_SUITE_SHA256=${{ steps.versions.outputs.oss_cad_suite_sha256 }}
             VERIBLE_VERSION=${{ steps.versions.outputs.verible_version }}
+            SV2V_VERSION=${{ steps.versions.outputs.sv2v_version }}
             PYTHON_VERSION=${{ steps.versions.outputs.python_version }}
 
       - name: Smoke test toolchain
@@ -110,6 +112,7 @@ jobs:
             verilator --version
             iverilog -V | head -n1
             verible-verilog-format --version
+            sv2v --version
             python3 -c "import pyslang, cocotb; print(\"pyslang\", pyslang.__name__); print(\"cocotb\", cocotb.__version__)"
             ruff --version
             mypy --version
