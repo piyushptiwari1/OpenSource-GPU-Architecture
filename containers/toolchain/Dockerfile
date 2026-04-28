@@ -116,9 +116,12 @@ ARG USERNAME=dev
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-RUN groupadd --gid ${USER_GID} ${USERNAME} 2>/dev/null || true && \
-    (id -u ${USERNAME} >/dev/null 2>&1 || \
-        useradd --uid ${USER_UID} --gid ${USER_GID} -m -s /bin/bash ${USERNAME}) && \
+# Ubuntu 24.04 ships a default `ubuntu` user at UID/GID 1000; remove it
+# so we can claim that range for our `dev` user.
+RUN if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu 2>/dev/null || userdel ubuntu; fi && \
+    if getent group ubuntu >/dev/null; then groupdel ubuntu 2>/dev/null || true; fi && \
+    groupadd --gid ${USER_GID} ${USERNAME} && \
+    useradd --uid ${USER_UID} --gid ${USER_GID} -m -s /bin/bash ${USERNAME} && \
     echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \
     chmod 0440 /etc/sudoers.d/${USERNAME}
 
