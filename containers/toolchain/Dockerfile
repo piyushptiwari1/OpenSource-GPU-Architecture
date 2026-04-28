@@ -124,8 +124,7 @@ RUN pip install \
 FROM py AS final
 
 ENV OSS_CAD_PREFIX=/opt/oss-cad-suite \
-    PATH="/opt/oss-cad-suite/bin:/opt/oss-cad-suite/py3bin:/opt/verible/bin:/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    LD_LIBRARY_PATH="/opt/oss-cad-suite/lib:/opt/oss-cad-suite/py3/lib:/opt/oss-cad-suite/libexec"
+    PATH="/opt/oss-cad-suite/bin:/opt/oss-cad-suite/py3bin:/opt/verible/bin:/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Non-root user `dev` with passwordless sudo (dev convenience only;
 # CI overrides USER as needed).

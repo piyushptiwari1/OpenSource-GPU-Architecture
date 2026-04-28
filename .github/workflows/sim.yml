@@ -73,6 +73,9 @@ jobs:
       - name: Run ${{ matrix.test }}
         run: |
           set -euo pipefail
+          # Source OSS CAD Suite environment so libpython/libcocotb resolve.
+          # shellcheck disable=SC1091
+          . /opt/oss-cad-suite/environment
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make -f Makefile.vlsi test_${{ matrix.test }}
@@ -138,6 +141,8 @@ jobs:
       - name: Run ${{ matrix.test }} kernel
         run: |
           set -euo pipefail
+          # shellcheck disable=SC1091
+          . /opt/oss-cad-suite/environment
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make test_${{ matrix.test }}
