@@ -32,6 +32,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         python3 python3-pip python3-venv python3-dev \
         libgmp-dev libmpfr-dev libmpc-dev libreadline-dev libffi-dev \
         zlib1g-dev libssl-dev \
+        iverilog gtkwave \
         sudo locales tini jq && \
     locale-gen C.UTF-8
 

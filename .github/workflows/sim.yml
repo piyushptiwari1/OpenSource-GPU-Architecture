@@ -78,7 +78,10 @@ jobs:
           # 2.0.0.dev pre-release that ships with OSS CAD Suite. iverilog/vvp
           # are Python-agnostic; libcocotb.so resolves libpython via ld.so
           # default search paths (Ubuntu /usr/lib/x86_64-linux-gnu).
-          export PATH="/opt/venv/bin:$PATH"
+          # Prefer /opt/venv (cocotb 1.9.x) and /usr/bin (system iverilog/vvp,
+          # ABI-compatible with system libpython3.12) over OSS CAD Suite
+          # which ships its own libm and conflicts with system libpython.
+          export PATH="/opt/venv/bin:/usr/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make -f Makefile.vlsi test_${{ matrix.test }}
@@ -144,7 +147,10 @@ jobs:
       - name: Run ${{ matrix.test }} kernel
         run: |
           set -euo pipefail
-          export PATH="/opt/venv/bin:$PATH"
+          # Prefer /opt/venv (cocotb 1.9.x) and /usr/bin (system iverilog/vvp,
+          # ABI-compatible with system libpython3.12) over OSS CAD Suite
+          # which ships its own libm and conflicts with system libpython.
+          export PATH="/opt/venv/bin:/usr/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make test_${{ matrix.test }}
