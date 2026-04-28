@@ -18,7 +18,7 @@ jobs:
     name: Python (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -49,7 +49,7 @@ jobs:
       # a release-tag bumper action is configured.
       VERIBLE_VERSION: v0.0-4053-g89d4d98a
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -132,7 +132,7 @@ jobs:
     name: Repository metadata
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Validate CITATION.cff
         uses: citation-file-format/cffconvert-github-action@4cf11baa70a673bfdf9dad0acc7ee33b3f4b6084  # v2.0.0
