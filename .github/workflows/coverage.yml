@@ -14,14 +14,18 @@ on:
     branches: [main]
     paths:
       - "sim/cppref/**"
+      - "sim/memory/**"
       - "tools/**"
+      - "test/memory/**"
       - "bench/**"
       - "docs/isa/instructions.yaml"
       - ".github/workflows/coverage.yml"
   pull_request:
     paths:
       - "sim/cppref/**"
+      - "sim/memory/**"
       - "tools/**"
+      - "test/memory/**"
       - "bench/**"
       - "docs/isa/instructions.yaml"
       - ".github/workflows/coverage.yml"
