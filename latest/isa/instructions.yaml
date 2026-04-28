@@ -1,0 +1,263 @@
+# OpenGPU canonical ISA (single source of truth)
+#
+# Encoding model
+# --------------
+# Width: 16 bits, big-endian field layout (MSB first).
+# Layout per instruction class:
+#
+#   R-type:    [15:12]=opcode  [11:8]=Rd     [7:4]=Rs    [3:0]=Rt
+#   I-type:    [15:12]=opcode  [11:8]=Rd     [7:0]=imm8
+#   B-type:    [15:12]=opcode  [11:9]=nzp    [8:0]=immediate (sign-irrelevant target index)
+#   Z-type:    [15:12]=opcode  [11:0]=0      (NOP, RET)
+#
+# Registers
+# ---------
+# - 16 general-purpose 8-bit registers per thread: R0..R15.
+# - Read-only system registers (decoded by execute):
+#     R13 -> %blockIdx
+#     R14 -> %blockDim
+#     R15 -> %threadIdx
+# - 3-bit NZP flag register written by CMP, consumed by BRnzp.
+#
+# Memory model
+# ------------
+# - Unified 8-bit address space, 8-bit words.
+# - LDR: load mem[Rs] -> Rd. STR: store Rt -> mem[Rs].
+#
+# Decode side-channels (for codegen / refsim parity with RTL decoder.sv)
+# ---------------------------------------------------------------------
+# Each instruction lists the control-signal vector the RTL decoder asserts.
+# Order matches src/decoder.sv outputs verbatim:
+#   reg_write_enable, mem_read_enable, mem_write_enable, nzp_write_enable,
+#   reg_input_mux (2b), alu_arithmetic_mux (2b), alu_output_mux,
+#   pc_mux, ret.
+#
+# Tooling
+# -------
+# This file is consumed by tools/codegen/* (Jinja2) to emit:
+#   * sim/cppref/include/opengpu/isa_table.hpp  (refsim decode table)
+#   * tools/asm/opengpu.asm                     (customasm grammar)
+#   * docs/isa/index.md                         (mkdocs page, later)
+#
+# Anything that adds a new opcode MUST update this file and re-run
+# `make -C tools/codegen regen`. Diff-clean regen is enforced in CI.
+
+version: 1
+isa:
+  name: opengpu
+  word_bits: 16
+  data_bits: 8
+  addr_bits: 8
+  num_registers: 16
+  nzp_bits: 3
+
+  registers:
+    - { id: 0,  name: R0  }
+    - { id: 1,  name: R1  }
+    - { id: 2,  name: R2  }
+    - { id: 3,  name: R3  }
+    - { id: 4,  name: R4  }
+    - { id: 5,  name: R5  }
+    - { id: 6,  name: R6  }
+    - { id: 7,  name: R7  }
+    - { id: 8,  name: R8  }
+    - { id: 9,  name: R9  }
+    - { id: 10, name: R10 }
+    - { id: 11, name: R11 }
+    - { id: 12, name: R12 }
+    - { id: 13, name: R13, alias: blockIdx,  readonly: true }
+    - { id: 14, name: R14, alias: blockDim,  readonly: true }
+    - { id: 15, name: R15, alias: threadIdx, readonly: true }
+
+  control_signals:
+    # name -> width (bits). Order matches RTL decoder output bus.
+    - { name: reg_write_enable,     width: 1 }
+    - { name: mem_read_enable,      width: 1 }
+    - { name: mem_write_enable,     width: 1 }
+    - { name: nzp_write_enable,     width: 1 }
+    - { name: reg_input_mux,        width: 2 }   # 0=ALU, 1=LSU, 2=imm, 3=rsvd
+    - { name: alu_arithmetic_mux,   width: 2 }   # 0=ADD,1=SUB,2=MUL,3=DIV
+    - { name: alu_output_mux,       width: 1 }   # 0=arith, 1=cmp(NZP)
+    - { name: pc_mux,               width: 1 }   # 0=PC+1, 1=branch
+    - { name: ret,                  width: 1 }
+
+instructions:
+  - mnemonic: NOP
+    opcode: 0x0
+    type: Z
+    syntax: "NOP"
+    semantics: "no-op"
+    control:
+      reg_write_enable: 0
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: BRnzp
+    opcode: 0x1
+    type: B
+    syntax: "BRnzp <nzp3>, <imm9>"
+    semantics: "if (NZP & nzp_mask) PC <- imm9"
+    control:
+      reg_write_enable: 0
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 1
+      ret: 0
+
+  - mnemonic: CMP
+    opcode: 0x2
+    type: R
+    syntax: "CMP Rs, Rt"
+    semantics: "NZP <- {Rs<Rt, Rs==Rt, Rs>Rt}"
+    control:
+      reg_write_enable: 0
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 1
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 1
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: ADD
+    opcode: 0x3
+    type: R
+    syntax: "ADD Rd, Rs, Rt"
+    semantics: "Rd <- Rs + Rt   (mod 2^8)"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: SUB
+    opcode: 0x4
+    type: R
+    syntax: "SUB Rd, Rs, Rt"
+    semantics: "Rd <- Rs - Rt   (mod 2^8)"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 1
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: MUL
+    opcode: 0x5
+    type: R
+    syntax: "MUL Rd, Rs, Rt"
+    semantics: "Rd <- (Rs * Rt) & 0xFF"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 2
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: DIV
+    opcode: 0x6
+    type: R
+    syntax: "DIV Rd, Rs, Rt"
+    # Division by zero: refsim returns 0 (matches Verilog's `/` truncation
+    # behaviour on Icarus when divisor is zero -- result is X in pure
+    # SystemVerilog but settles to 0 in the cocotb/iverilog flow used here).
+    # If you change this, update refsim AND add a covergroup for it.
+    semantics: "Rd <- (Rt == 0) ? 0 : (Rs / Rt)"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 3
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: LDR
+    opcode: 0x7
+    type: R
+    syntax: "LDR Rd, Rs"
+    semantics: "Rd <- mem[Rs]"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 1
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 1
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: STR
+    opcode: 0x8
+    type: R
+    syntax: "STR Rs, Rt"
+    semantics: "mem[Rs] <- Rt"
+    control:
+      reg_write_enable: 0
+      mem_read_enable: 0
+      mem_write_enable: 1
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: CONST
+    opcode: 0x9
+    type: I
+    syntax: "CONST Rd, #imm8"
+    semantics: "Rd <- imm8"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 2
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  - mnemonic: RET
+    opcode: 0xF
+    type: Z
+    syntax: "RET"
+    semantics: "thread halts (decoded_ret asserted)"
+    control:
+      reg_write_enable: 0
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 1
