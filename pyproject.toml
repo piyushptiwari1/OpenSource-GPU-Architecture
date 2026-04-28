@@ -170,7 +170,7 @@ markers = [
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 branch = true
-source = ["tools", "bench"]
+source = ["tools", "bench", "sim/memory"]
 omit = [
     "*/sim_build/*",
     "*/build/*",

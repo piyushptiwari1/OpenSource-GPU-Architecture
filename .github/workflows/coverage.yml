@@ -149,6 +149,7 @@ jobs:
               -m pytest tools/asm/tests \
                         tools/difftest/tests \
                         tools/tinygrad_opengpu/tests \
+                        test/memory \
                         -q
           # tools/codegen has no unit tests yet; exercise it via the
           # idempotency CLI so its lines are at least executed.

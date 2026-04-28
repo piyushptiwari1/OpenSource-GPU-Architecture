@@ -1,0 +1,22 @@
+# HBM2 1024-bit-wide stack configuration.
+# Modelled after the per-channel timing in HBM2 8-Hi 8 GiB stack at
+# 1.0 GHz tCK (2 Gbps per pin x 1024 pins = 256 GB/s aggregate).
+name: hbm2_1024
+channels: 8                  # 8 pseudo-channels per stack (HBM2 spec)
+ranks: 1
+banks_per_rank: 16           # per pseudo-channel
+capacity_mib: 8192           # 8 GiB stack
+bus_width_bits: 128          # per pseudo-channel; aggregate = 1024 bits
+burst_length: 4
+timing:
+  tck_ps: 1000               # 1 / 1.0 GHz
+  read_latency_ck: 14
+  write_latency_ck: 4
+  ras_ck: 33
+  rcd_ck: 14
+  rp_ck: 14
+  refresh_period_us: 1.9
+ramulator2:
+  preset: HBM2
+  org: HBM2_8Gb
+  speed: HBM2_2Gbps
