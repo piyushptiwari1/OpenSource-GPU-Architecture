@@ -77,3 +77,10 @@ env/
 
 # SymbiYosys workdirs (named after the .sby task)
 formal/*/[a-z]*/
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+build/
+dist/
