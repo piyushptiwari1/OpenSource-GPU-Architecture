@@ -1,0 +1,89 @@
+name: Formal verification
+
+# Runs SymbiYosys + yosys-smtbmc + yices2 (via OSS CAD Suite in our
+# pinned toolchain image) on every formal/<module>/<module>.sby. A
+# matrix entry per module keeps failures isolated.
+#
+# Properties are wired in via formal/<module>/<module>_formal_top.sv;
+# see formal/README.md for the rationale and the immediate-assert style.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "formal/**"
+      - ".github/workflows/formal.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "formal/**"
+      - ".github/workflows/formal.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: formal-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TOOLCHAIN_IMAGE: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+
+jobs:
+  sby:
+    name: sby ${{ matrix.module }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+      options: --user root
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [dcr]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          export PATH="/opt/oss-cad-suite/bin:$PATH"
+          which sby yosys yices
+          sby --version | head -1
+
+      - name: Run sby
+        working-directory: formal/${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          export PATH="/opt/oss-cad-suite/bin:$PATH"
+          rm -rf "${{ matrix.module }}"
+          sby -f "${{ matrix.module }}.sby"
+
+      - name: Upload sby workdir on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sby-${{ matrix.module }}-failure
+          path: formal/${{ matrix.module }}/${{ matrix.module }}/
+
+  formal-status:
+    name: Formal status
+    runs-on: ubuntu-24.04
+    needs: sby
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          set -euo pipefail
+          r='${{ needs.sby.result }}'
+          echo "sby matrix: $r"
+          if [ "$r" != "success" ]; then
+            echo "::error::formal verification failed"
+            exit 1
+          fi

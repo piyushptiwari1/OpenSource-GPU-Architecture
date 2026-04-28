@@ -1,0 +1,187 @@
+name: Supply chain
+
+# C-21: dependency vulnerability scanning + SBOM generation.
+#
+# - pip-audit:   audits Python packages declared in pyproject.toml against
+#                the PyPI advisory database (OSV-style).
+# - syft:        generates an SPDX SBOM for the repository checkout
+#                (covers Python deps + the toolchain Dockerfile pins).
+# - container:   runs syft on the toolchain image so we have an SBOM for
+#                the binary tools we ship in CI (yosys, sby, sv2v, …).
+#
+# Findings are posted as workflow artifacts and surfaced via the
+# Step Summary; the job is gating only on tool errors, not on
+# advisory hits (those land as PRs from Dependabot).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "containers/**"
+      - ".github/workflows/supply-chain.yml"
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "containers/**"
+      - ".github/workflows/supply-chain.yml"
+  schedule:
+    # Weekly Monday 06:00 UTC: catch newly-disclosed CVEs even when
+    # nothing else changes.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install pip-audit and project deps
+        run: |
+          set -euo pipefail
+          pip install "pip-audit>=2.7"
+          # Install runtime deps (NOT dev/docs) into a fresh environment
+          # so pip-audit can audit the actual resolved dependency tree.
+          # We rely on the [project.dependencies] table in pyproject.toml.
+          pip install . || pip install --editable . || true
+
+      - name: Run pip-audit
+        run: |
+          set -euo pipefail
+          # --strict: fail on resolution errors. Vulnerabilities are
+          # captured but treated as non-fatal here (Dependabot raises PRs).
+          set +e
+          pip-audit --progress-spinner off --strict --output pip-audit.txt
+          rc=$?
+          set -e
+          cat pip-audit.txt || true
+          echo "## pip-audit" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          (cat pip-audit.txt 2>/dev/null || echo "no advisories") >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # rc=1 means advisories found; we only fail on rc>=2 (tool error).
+          if [ "$rc" -ge 2 ]; then exit "$rc"; fi
+          exit 0
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit.txt
+          if-no-files-found: ignore
+
+  sbom-source:
+    name: SBOM (source tree)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install syft
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+          syft version
+
+      - name: Generate SPDX SBOM
+        run: |
+          set -euo pipefail
+          syft scan dir:. \
+            --output spdx-json=sbom.source.spdx.json \
+            --source-name "${GITHUB_REPOSITORY}" \
+            --source-version "${GITHUB_SHA}"
+          # Quick sanity output for the summary.
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d = json.load(open("sbom.source.spdx.json"))
+          pkgs = d.get("packages", [])
+          print("## SBOM (source)\n")
+          print(f"- packages: **{len(pkgs)}**")
+          print(f"- format: SPDX-JSON, syft v1.18.1")
+          PY
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-source-spdx
+          path: sbom.source.spdx.json
+
+  sbom-container:
+    name: SBOM (toolchain image)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install syft
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+
+      - name: Generate SPDX SBOM for toolchain image
+        run: |
+          set -euo pipefail
+          syft scan registry:ghcr.io/piyushptiwari1/opengpu-toolchain:latest \
+            --output spdx-json=sbom.toolchain.spdx.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d = json.load(open("sbom.toolchain.spdx.json"))
+          pkgs = d.get("packages", [])
+          print("## SBOM (toolchain image)\n")
+          print(f"- packages: **{len(pkgs)}**")
+          print(f"- format: SPDX-JSON, syft v1.18.1")
+          PY
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-toolchain-spdx
+          path: sbom.toolchain.spdx.json
+
+  supply-chain-status:
+    name: Supply chain status
+    runs-on: ubuntu-24.04
+    needs: [pip-audit, sbom-source, sbom-container]
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          set -euo pipefail
+          a='${{ needs.pip-audit.result }}'
+          b='${{ needs.sbom-source.result }}'
+          c='${{ needs.sbom-container.result }}'
+          echo "pip-audit:      $a"
+          echo "sbom-source:    $b"
+          echo "sbom-container: $c"
+          # SBOM jobs must succeed; pip-audit advisories are non-fatal but
+          # tool errors (resolution, network) ARE fatal.
+          fail=0
+          for r in "$a" "$b" "$c"; do
+            if [ "$r" != "success" ]; then fail=1; fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::supply-chain checks failed"
+            exit 1
+          fi
