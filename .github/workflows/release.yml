@@ -1,0 +1,241 @@
+name: Release
+
+# C-18: tag-driven release pipeline.
+#
+# Trigger: push of a semver tag ``vX.Y.Z`` (or pre-release ``vX.Y.Z-rcN``).
+# Outputs:
+#   1. GitHub Release with auto-generated notes, attaching:
+#        - opengpu-refsim-linux-x86_64 (statically-shaped Release binary)
+#        - opengpu_tools-X.Y.Z-py3-none-any.whl
+#        - opengpu_tools-X.Y.Z.tar.gz (sdist)
+#        - SHA256SUMS
+#   2. Toolchain container image re-tagged at
+#        ghcr.io/<owner>/opengpu-toolchain:<tag>
+#      (the :latest tag is built by build-toolchain.yml; this step pins
+#      a versioned alias so releases are reproducible).
+#
+# A workflow_dispatch entry point exists for testing the build/staging
+# steps without creating a GitHub Release (no publish in dispatch mode).
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch/tag to build (no release will be published)"
+        required: false
+        default: "main"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # required to create the GitHub Release
+  packages: write   # required to push to GHCR
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # --------------------------------------------------------------
+  # Resolve the version once so all downstream jobs agree on it.
+  # --------------------------------------------------------------
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-24.04
+    outputs:
+      version:    ${{ steps.v.outputs.version }}
+      tag:        ${{ steps.v.outputs.tag }}
+      is_release: ${{ steps.v.outputs.is_release }}
+    steps:
+      - id: v
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            version="${tag#v}"
+            echo "is_release=true"  >> "$GITHUB_OUTPUT"
+          else
+            tag="dispatch-${GITHUB_SHA::7}"
+            version="0.0.0+${GITHUB_SHA::7}"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=${tag}"         >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag=${tag} version=${version}"
+
+  # --------------------------------------------------------------
+  # Build the Python distribution (wheel + sdist).
+  # --------------------------------------------------------------
+  python-dist:
+    name: Build Python wheel + sdist
+    runs-on: ubuntu-24.04
+    needs: meta
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build tools
+        run: pip install "build>=1.2" "twine>=5.0"
+
+      - name: Build wheel + sdist
+        run: |
+          set -euo pipefail
+          python -m build --wheel --sdist --outdir dist/
+          twine check --strict dist/*
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+  # --------------------------------------------------------------
+  # Build the C++ refsim Release binary.
+  # --------------------------------------------------------------
+  refsim-binary:
+    name: Build opengpu-refsim (linux-x86_64)
+    runs-on: ubuntu-24.04
+    needs: meta
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install build deps
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build
+
+      - name: Configure (Release)
+        working-directory: sim/cppref
+        run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        working-directory: sim/cppref
+        run: cmake --build build -j --target opengpu-refsim
+
+      - name: Stage binary
+        run: |
+          set -euo pipefail
+          mkdir -p stage
+          cp sim/cppref/build/opengpu-refsim \
+             stage/opengpu-refsim-${{ needs.meta.outputs.version }}-linux-x86_64
+          (cd stage && sha256sum * > SHA256SUMS-refsim)
+          ls -la stage
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: refsim-binary
+          path: stage/
+
+  # --------------------------------------------------------------
+  # Re-tag the latest toolchain container image at the release tag.
+  # build-toolchain.yml owns producing :latest; this just adds an alias.
+  # --------------------------------------------------------------
+  retag-toolchain:
+    name: Re-tag toolchain image
+    runs-on: ubuntu-24.04
+    needs: meta
+    if: needs.meta.outputs.is_release == 'true'
+    timeout-minutes: 10
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull, tag, push
+        run: |
+          set -euo pipefail
+          src="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/opengpu-toolchain:latest"
+          dst="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/opengpu-toolchain:${{ needs.meta.outputs.tag }}"
+          docker pull "$src"
+          docker tag  "$src" "$dst"
+          docker push "$dst"
+          echo "Pushed $dst"
+
+  # --------------------------------------------------------------
+  # Aggregate artefacts and publish the GitHub Release.
+  # Skipped on workflow_dispatch (no tag).
+  # --------------------------------------------------------------
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-24.04
+    needs: [meta, python-dist, refsim-binary, retag-toolchain]
+    if: needs.meta.outputs.is_release == 'true'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: refsim-binary
+          path: dist/
+
+      - name: Compute combined SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          rm -f SHA256SUMS-refsim || true
+          sha256sum * > SHA256SUMS
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*
+
+  # --------------------------------------------------------------
+  # Gate.
+  # --------------------------------------------------------------
+  release-status:
+    name: Release status
+    runs-on: ubuntu-24.04
+    needs: [meta, python-dist, refsim-binary, retag-toolchain, publish]
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          set -euo pipefail
+          # In dispatch mode, retag-toolchain + publish are intentionally
+          # skipped; treat 'skipped' as success there.
+          ok () { [[ "$1" == "success" || "$1" == "skipped" ]]; }
+          a='${{ needs.python-dist.result }}'
+          b='${{ needs.refsim-binary.result }}'
+          c='${{ needs.retag-toolchain.result }}'
+          d='${{ needs.publish.result }}'
+          echo "python-dist:     $a"
+          echo "refsim-binary:   $b"
+          echo "retag-toolchain: $c"
+          echo "publish:         $d"
+          if ok "$a" && ok "$b" && ok "$c" && ok "$d"; then
+            exit 0
+          fi
+          echo "::error::release pipeline failed"
+          exit 1
