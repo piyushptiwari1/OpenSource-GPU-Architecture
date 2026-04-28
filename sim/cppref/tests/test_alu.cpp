@@ -11,12 +11,20 @@ using namespace opengpu::ref;
 namespace {
 
 [[nodiscard]] std::uint16_t encode_const(std::uint8_t rd, std::uint8_t imm) {
-    return static_cast<std::uint16_t>((0x9u << 12) | ((rd & 0xFu) << 8) | imm);
+    const auto rd16 = static_cast<std::uint16_t>(rd & 0xFu);
+    return static_cast<std::uint16_t>(
+        (std::uint16_t{0x9} << 12) | static_cast<std::uint16_t>(rd16 << 8) | imm);
 }
 [[nodiscard]] std::uint16_t encode_r(std::uint8_t op, std::uint8_t rd,
                                      std::uint8_t rs, std::uint8_t rt) {
+    const auto op16 = static_cast<std::uint16_t>(op & 0xFu);
+    const auto rd16 = static_cast<std::uint16_t>(rd & 0xFu);
+    const auto rs16 = static_cast<std::uint16_t>(rs & 0xFu);
+    const auto rt16 = static_cast<std::uint16_t>(rt & 0xFu);
     return static_cast<std::uint16_t>(
-        (op << 12) | ((rd & 0xFu) << 8) | ((rs & 0xFu) << 4) | (rt & 0xFu));
+        static_cast<std::uint16_t>(op16 << 12) |
+        static_cast<std::uint16_t>(rd16 << 8) |
+        static_cast<std::uint16_t>(rs16 << 4) | rt16);
 }
 [[nodiscard]] std::uint16_t encode_ret() { return 0xF000; }
 

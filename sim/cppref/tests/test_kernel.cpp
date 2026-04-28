@@ -12,10 +12,15 @@ using namespace opengpu::ref;
 namespace {
 constexpr std::uint16_t I(std::uint16_t op, std::uint16_t rd,
                           std::uint16_t rs, std::uint16_t rt) {
-    return static_cast<std::uint16_t>((op << 12) | (rd << 8) | (rs << 4) | rt);
+    return static_cast<std::uint16_t>(
+        static_cast<std::uint16_t>(op << 12) |
+        static_cast<std::uint16_t>(rd << 8) |
+        static_cast<std::uint16_t>(rs << 4) | rt);
 }
 constexpr std::uint16_t C(std::uint16_t rd, std::uint16_t imm) {
-    return static_cast<std::uint16_t>((0x9 << 12) | (rd << 8) | imm);
+    return static_cast<std::uint16_t>(
+        (std::uint16_t{0x9} << 12) |
+        static_cast<std::uint16_t>(rd << 8) | imm);
 }
 }  // namespace
 
