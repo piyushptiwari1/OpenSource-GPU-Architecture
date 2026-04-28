@@ -36,6 +36,7 @@ JSON       := $(BUILD_DIR)/$(TOP).json
 ASC        := $(BUILD_DIR)/$(TOP).asc
 BIN        := $(BUILD_DIR)/$(TOP).bin
 TIMING     := $(BUILD_DIR)/$(TOP).timing.rpt
+FLAT_V     := $(BUILD_DIR)/flat.v
 
 .PHONY: all synth pnr bitstream timing prog clean
 
@@ -49,11 +50,14 @@ timing: $(TIMING)
 $(BUILD_DIR):
 	mkdir -p $@
 
-# yosys: synth_ice40 -abc9 picks up SB_RAM block-RAM inference.  We
-# pass `-defer` to read_verilog so cross-file module references resolve
-# regardless of file order.
-$(JSON): $(SRCS_CORE) $(SRCS_TOP) | $(BUILD_DIR)
-	yosys -p "read_verilog -sv -defer $(SRCS_CORE) $(SRCS_TOP); \
+# sv2v converts unpacked-array ports / SV-isms to plain Verilog so
+# yosys' frontend doesn't choke.  The wrapper is plain Verilog 2001
+# but we run it through sv2v anyway for uniform handling.
+$(FLAT_V): $(SRCS_CORE) $(SRCS_TOP) | $(BUILD_DIR)
+	sv2v -I $(REPO_ROOT)/src -w $@ $(SRCS_CORE) $(SRCS_TOP)
+
+$(JSON): $(FLAT_V) | $(BUILD_DIR)
+	yosys -p "read_verilog $(FLAT_V); \
 	         hierarchy -check -top $(TOP); \
 	         synth_ice40 -top $(TOP) -abc9 -dffe_min_ce_use 4 -json $@" \
 	         -l $(BUILD_DIR)/yosys.log

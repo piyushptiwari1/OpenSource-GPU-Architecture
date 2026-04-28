@@ -65,9 +65,9 @@ jobs:
       - name: Tool versions
         run: |
           set -euo pipefail
-          # Use OSS CAD Suite's yosys (system-installed iverilog only
-          # matters for cocotb).
-          export PATH="/opt/oss-cad-suite/bin:$PATH"
+          # /usr/local/bin (sv2v) + OSS CAD Suite for yosys/nextpnr.
+          export PATH="/usr/local/bin:/opt/oss-cad-suite/bin:$PATH"
+          which sv2v && sv2v --version || true
           which yosys && yosys -V | head -n1
           which nextpnr-ice40 && nextpnr-ice40 --version | head -n1 || true
           which nextpnr-ecp5  && nextpnr-ecp5 --version  | head -n1 || true
@@ -75,17 +75,17 @@ jobs:
       - name: yosys synth_check
         run: |
           set -euo pipefail
-          export PATH="/opt/oss-cad-suite/bin:$PATH"
-          mkdir -p flow/synth/build
-          yosys -q -l flow/synth/build/yosys.log \
-                -s flow/synth/synth_check.ys
+          export PATH="/usr/local/bin:/opt/oss-cad-suite/bin:$PATH"
+          make -C flow/synth all
 
       - name: Upload synth log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: synth-check-log
-          path: flow/synth/build/yosys.log
+          path: |
+            flow/synth/build/yosys.log
+            flow/synth/build/synth.stat.txt
           if-no-files-found: ignore
           retention-days: 14
 
@@ -117,7 +117,7 @@ jobs:
       - name: Build (${{ matrix.target }})
         run: |
           set -euo pipefail
-          export PATH="/opt/oss-cad-suite/bin:$PATH"
+          export PATH="/usr/local/bin:/opt/oss-cad-suite/bin:$PATH"
           make -C ${{ matrix.make_dir }} all
 
       - name: Upload artefacts

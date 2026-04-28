@@ -28,6 +28,7 @@ SRCS_TOP   := $(REPO_ROOT)/flow/fpga/common/gpu_fpga_top.sv
 JSON       := $(BUILD_DIR)/$(TOP).json
 CFG        := $(BUILD_DIR)/$(TOP).config
 BIT        := $(BUILD_DIR)/$(TOP).bit
+FLAT_V     := $(BUILD_DIR)/flat.v
 
 .PHONY: all synth pnr bitstream prog clean
 
@@ -40,8 +41,11 @@ bitstream: $(BIT)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(JSON): $(SRCS_CORE) $(SRCS_TOP) | $(BUILD_DIR)
-	yosys -p "read_verilog -sv -defer $(SRCS_CORE) $(SRCS_TOP); \
+$(FLAT_V): $(SRCS_CORE) $(SRCS_TOP) | $(BUILD_DIR)
+	sv2v -I $(REPO_ROOT)/src -w $@ $(SRCS_CORE) $(SRCS_TOP)
+
+$(JSON): $(FLAT_V) | $(BUILD_DIR)
+	yosys -p "read_verilog $(FLAT_V); \
 	          hierarchy -check -top $(TOP); \
 	          synth_ecp5 -top $(TOP) -abc9 -json $@" \
 	          -l $(BUILD_DIR)/yosys.log

@@ -7,7 +7,7 @@ cleaned up):
 
 | Flow | Tools | Target | Status |
 |------|-------|--------|--------|
-| [`synth/`](synth/) | yosys (generic) | synthesizability check | CI-gated |
+| [`synth/`](synth/) | sv2v + yosys (generic) | synthesizability check | CI-gated |
 | [`fpga/ice40/`](fpga/ice40/) | yosys + nextpnr-ice40 + icepack | iCE40HX8K-CT256 | manual / dispatch |
 | [`fpga/ecp5/`](fpga/ecp5/)   | yosys + nextpnr-ecp5 + ecppack | ECP5-25F (ULX3S) | manual / dispatch |
 | [`openlane2/`](openlane2/)   | OpenLane2 (`librelane`) | sky130A ASIC | manual / dispatch |
