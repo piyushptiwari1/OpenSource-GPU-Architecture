@@ -69,6 +69,7 @@ jobs:
           which sv2v && sv2v --version || true
           which cocotb-config && cocotb-config --version || true
           which python3 && python3 --version
+          find /opt/oss-cad-suite -maxdepth 4 -name 'libpython*.so*' 2>/dev/null | head -5 || true
 
       - name: Run ${{ matrix.test }}
         run: |
@@ -76,6 +77,9 @@ jobs:
           # Source OSS CAD Suite environment so libpython/libcocotb resolve.
           # shellcheck disable=SC1091
           . /opt/oss-cad-suite/environment
+          # OSS CAD Suite ships its libpython under py3/lib (not lib/);
+          # extend LD_LIBRARY_PATH so vvp can resolve Py_DecodeLocale.
+          export LD_LIBRARY_PATH="/opt/oss-cad-suite/py3/lib:${LD_LIBRARY_PATH:-}"
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make -f Makefile.vlsi test_${{ matrix.test }}
@@ -143,6 +147,7 @@ jobs:
           set -euo pipefail
           # shellcheck disable=SC1091
           . /opt/oss-cad-suite/environment
+          export LD_LIBRARY_PATH="/opt/oss-cad-suite/py3/lib:${LD_LIBRARY_PATH:-}"
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make test_${{ matrix.test }}
