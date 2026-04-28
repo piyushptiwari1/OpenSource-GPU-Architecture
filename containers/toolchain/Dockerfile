@@ -116,7 +116,7 @@ RUN pip install \
         'pyslang>=10.0,<11' \
         'pytest>=8.0,<9' \
         'pytest-cov>=5.0,<6' \
-        'cocotb>=2.0,<3' \
+        'cocotb>=1.9,<2' \
         'cocotb-test>=0.2,<1' \
         'pre-commit>=3.7,<5'
 
