@@ -1,0 +1,156 @@
+name: Reference simulator
+
+# Builds the C++ reference simulator (sim/cppref) and runs Catch2 tests.
+# Also enforces that ISA-derived artefacts (sim/cppref/include/opengpu/isa_table.hpp,
+# tools/asm/opengpu.asm) stay in sync with docs/isa/instructions.yaml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: refsim-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # --------------------------------------------------------------
+  # ISA codegen idempotency: regen artefacts and diff against tree.
+  # --------------------------------------------------------------
+  isa-codegen-check:
+    name: ISA codegen --check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install codegen deps
+        run: pip install "jinja2>=3.1" "pyyaml>=6.0" pytest
+
+      - name: python -m tools.codegen.regen --check
+        run: python -m tools.codegen.regen --check
+
+      - name: pytest tools/difftest
+        run: python -m pytest tools/difftest/tests -q
+
+  # --------------------------------------------------------------
+  # Build refsim + Catch2 tests.  Uses ubuntu-24.04 (g++-13) for C++20.
+  # --------------------------------------------------------------
+  build-test:
+    name: build + ctest (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    env:
+      CMAKE_GENERATOR: Ninja
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build cmake clang
+          cmake --version
+          ninja --version
+
+      - name: Select compiler
+        run: |
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            echo "CC=clang"   >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc"     >> "$GITHUB_ENV"
+            echo "CXX=g++"    >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure
+        working-directory: sim/cppref
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        working-directory: sim/cppref
+        run: cmake --build build -j
+
+      - name: Test
+        working-directory: sim/cppref/build
+        run: ctest --output-on-failure --no-tests=error
+
+      - name: Smoke run (matadd-8, golden trace from cocotb)
+        working-directory: sim/cppref
+        run: |
+          set -euo pipefail
+          # Same program/data the cocotb matadd test uses; refsim must reach
+          # done=true on every thread without exceeding 200 retired insns.
+          cat >/tmp/matadd.prog <<'PROG'
+          0x5000
+          0x3004
+          0x6201
+          0x2107
+          0x3000
+          0x6203
+          0x2207
+          0x3000
+          0x6204
+          0x2307
+          0x9300
+          0x9410
+          0x4422
+          0x8235
+          0xF000
+          PROG
+          printf '0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n' \
+              >/tmp/matadd.data
+          ./build/opengpu-refsim \
+              --program /tmp/matadd.prog \
+              --data    /tmp/matadd.data \
+              --threads 8 --blocks 1 \
+              --trace /tmp/matadd.trace.json \
+              --max-steps 200
+
+      - name: Upload trace artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: refsim-trace-${{ matrix.compiler }}
+          path: /tmp/matadd.trace.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # --------------------------------------------------------------
+  # Aggregate gate.
+  # --------------------------------------------------------------
+  refsim-status:
+    name: Refsim status
+    needs: [isa-codegen-check, build-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate
+        run: |
+          set -euo pipefail
+          cg='${{ needs.isa-codegen-check.result }}'
+          bt='${{ needs.build-test.result }}'
+          echo "isa-codegen-check: $cg"
+          echo "build-test:        $bt"
+          if [ "$cg" != "success" ] || [ "$bt" != "success" ]; then
+            echo "::error::refsim CI failed"
+            exit 1
+          fi

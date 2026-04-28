@@ -113,6 +113,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "test/**" = ["S101", "PLR2004"]
 "tools/codegen/**" = ["S701"]   # jinja2 autoescape not always needed for code gen
+# DiffTest invokes the trusted refsim binary; cmd is constructed from
+# typed args, not user input.  Magic small ints in tests are intentional
+# (number of records compared).
+"tools/difftest/__init__.py" = ["S603"]
+"tools/difftest/tests/**" = ["PLR2004"]
 
 [tool.ruff.format]
 quote-style = "double"
