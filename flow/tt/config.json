@@ -1,0 +1,53 @@
+{
+    "_comment_design": "Tiny Tapeout submission: top is the standard tt_um_* wrapper. The wrapper instantiates the full `gpu` core; multi-tile sizing is required.",
+
+    "DESIGN_NAME": "tt_um_tiny_gpu",
+    "VERILOG_FILES": [
+        "dir::../../src/alu.sv",
+        "dir::../../src/controller.sv",
+        "dir::../../src/core.sv",
+        "dir::../../src/dcr.sv",
+        "dir::../../src/decoder.sv",
+        "dir::../../src/dispatch.sv",
+        "dir::../../src/fetcher.sv",
+        "dir::../../src/gpu.sv",
+        "dir::../../src/lsu.sv",
+        "dir::../../src/pc.sv",
+        "dir::../../src/registers.sv",
+        "dir::../../src/scheduler.sv",
+        "dir::../../src/tt_um_tiny_gpu.sv"
+    ],
+
+    "_comment_clock": "Tiny Tapeout user clock is 10 MHz nominal (100 ns period).",
+    "CLOCK_PORT": "clk",
+    "CLOCK_NET":  "clk",
+    "CLOCK_PERIOD": 100.0,
+
+    "_comment_pdk": "Sky130A high-density, 1.8V — Tiny Tapeout 7+ uses sky130A.",
+    "PDK": "sky130A",
+    "STD_CELL_LIBRARY": "sky130_fd_sc_hd",
+
+    "_comment_floorplan": "4x2 tiles (~640 x 200 um per Tiny Tapeout 7 spec). Final tile count locked once first harden run reports utilisation.",
+    "FP_SIZING": "absolute",
+    "DIE_AREA":  "0 0 640 200",
+    "FP_CORE_UTIL": 45,
+    "TARGET_DENSITY_PCT": 60,
+
+    "_comment_dev": "tiny-gpu uses unpacked-array module ports; OpenLane2 invokes sv2v internally when USE_SYNLIG is off.",
+    "USE_SYNLIG": false,
+
+    "_comment_synthesis_strategy": "Optimise for area on Tiny Tapeout (logic is the dominant constraint, not Fmax).",
+    "SYNTH_STRATEGY": "AREA 0",
+
+    "RUN_HEURISTIC_DIODE_INSERTION": true,
+    "DIODE_ON_PORTS": "in",
+
+    "_comment_signoff": "Magic + Netgen LVS, OpenROAD STA. Linter on. CVC off (run separately if needed).",
+    "RUN_LINTER": true,
+    "RUN_CVC": false,
+
+    "meta": {
+        "version": 2,
+        "flow": "Classic"
+    }
+}

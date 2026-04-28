@@ -1,0 +1,156 @@
+name: Tiny Tapeout
+
+# C-20 Path A: pre-flight check for the Tiny Tapeout submission.
+#
+# - synth-check: yosys generic synth of the tt_um_tiny_gpu wrapper.
+#                Fast (~1 min); runs on every push and PR touching
+#                the wrapper, the TT manifest, or this workflow.
+# - validate-info: schema-light sanity on src/info.yaml (top_module
+#                  matches the wrapper, sources file exists, etc.).
+#
+# The full GDS hardening lives in flow/tt/config.json (OpenLane2);
+# Tiny Tapeout's own CI runs it on submission, and we re-run it
+# locally before each shuttle window. We do not run OpenLane2 in
+# this workflow because the toolchain image does not bundle the
+# OpenLane2 client by default.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/info.yaml"
+      - "src/tt_um_tiny_gpu.sv"
+      - "flow/tt/**"
+      - ".github/workflows/tt.yml"
+  pull_request:
+    paths:
+      - "src/info.yaml"
+      - "src/tt_um_tiny_gpu.sv"
+      - "flow/tt/**"
+      - ".github/workflows/tt.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: tt-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate-info:
+    name: Validate src/info.yaml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: PyYAML
+        run: pip install --quiet "pyyaml>=6"
+
+      - name: Schema check
+        run: |
+          python - <<'PY'
+          import sys, pathlib, yaml
+          info_path = pathlib.Path("src/info.yaml")
+          info = yaml.safe_load(info_path.read_text())
+
+          errors: list[str] = []
+
+          proj = info.get("project") or {}
+          for key in ("title", "author", "description", "language"):
+              if not proj.get(key):
+                  errors.append(f"project.{key} missing or empty")
+
+          top = info.get("top_module")
+          if not isinstance(top, str) or not top.startswith("tt_um_"):
+              errors.append(f"top_module must start with tt_um_; got {top!r}")
+
+          srcs = info.get("sources") or []
+          if not srcs:
+              errors.append("sources must list at least the wrapper")
+          for s in srcs:
+              p = pathlib.Path("src") / s
+              if not p.exists():
+                  errors.append(f"sources entry not found on disk: {p}")
+
+          # Verify the declared top is defined in the listed sources.
+          import re
+          mod_re = re.compile(rf"^\s*module\s+{re.escape(top)}\b", re.M)
+          if top:
+              found = False
+              for s in srcs:
+                  txt = (pathlib.Path("src") / s).read_text(errors="ignore")
+                  if mod_re.search(txt):
+                      found = True
+                      break
+              if not found:
+                  errors.append(
+                      f"declared top {top!r} not defined in any of: {srcs}"
+                  )
+
+          if errors:
+              for e in errors:
+                  print(f"::error file=src/info.yaml::{e}")
+              sys.exit(1)
+          print("info.yaml OK")
+          PY
+
+  synth-check:
+    name: yosys synth-check (tt_um_tiny_gpu)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+      options: --user root
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          export PATH="/usr/local/bin:/opt/oss-cad-suite/bin:$PATH"
+          which sv2v && sv2v --version || true
+          which yosys && yosys -V | head -n1
+
+      - name: yosys synth_check
+        run: |
+          set -euo pipefail
+          export PATH="/usr/local/bin:/opt/oss-cad-suite/bin:$PATH"
+          make -C flow/tt all
+
+      - name: Upload synth log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tt-synth-check-log
+          path: |
+            flow/tt/build/yosys.log
+            flow/tt/build/synth.stat.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  tt-status:
+    name: Tiny Tapeout status
+    needs: [validate-info, synth-check]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          set -euo pipefail
+          v='${{ needs.validate-info.result }}'
+          s='${{ needs.synth-check.result }}'
+          echo "validate-info: $v"
+          echo "synth-check:   $s"
+          if [ "$v" != "success" ] || [ "$s" != "success" ]; then
+            echo "::error::Tiny Tapeout pre-flight failed"
+            exit 1
+          fi

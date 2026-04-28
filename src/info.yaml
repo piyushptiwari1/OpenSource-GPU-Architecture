@@ -1,31 +1,46 @@
 # Tiny Tapeout project information
 # See: https://tinytapeout.com/specs/
+#
+# Submission layout:
+#   - this manifest:        src/info.yaml
+#   - top-level wrapper:    src/tt_um_tiny_gpu.sv
+#   - hardening config:     flow/tt/config.json (OpenLane2)
+#   - public description:   flow/tt/docs/info.md
 
 project:
-  title: "Tiny GPU"
-  author: "LKG GPU Project"
+  title: "OpenGPU (tiny-gpu fork)"
+  author: "Piyush Tiwari"
   discord: ""
-  description: "A minimal educational GPU implementation for Tiny Tapeout"
-  language: "Verilog"
-  clock_hz: 10000000  # 10 MHz default clock
+  description: >
+    Educational SIMT GPU with a serial command/data interface, packaged
+    for Tiny Tapeout. Programmable instruction memory, data memory,
+    thread-count register, and start/stop control are all reachable
+    through the 8-bit ui_in / uo_out pins plus the bidirectional uio
+    bus. RTL provenance: adam-maj/tiny-gpu (MIT).
+  language: "SystemVerilog"
+  clock_hz: 10000000  # 10 MHz; OpenLane2 hardening targets a 100 ns period.
 
-# Source files
+# Source files (paths relative to this file's directory).
 sources:
   - tt_um_tiny_gpu.sv
 
-# Top level module
+# Top-level module exposed to the Tiny Tapeout harness.
 top_module: "tt_um_tiny_gpu"
 
 # Documentation
-documentation_url: ""
-source_url: "https://github.com/VidhyaSanjeevi/lkg-gpu"
+documentation_url: "https://piyushptiwari1.github.io/OpenSource-GPU-Architecture/"
+source_url: "https://github.com/piyushptiwari1/OpenSource-GPU-Architecture"
 
-# Hardware
+# Hardware: the wrapper integrates the full `gpu` core, which exceeds
+# a single tile. The exact tile count is finalised after the first
+# hardening run; bump if utilisation > 90 %.
 hardware:
-  # Number of tiles used (each tile is ~160x225 um)
-  tiles: 1
-  
-# Pinout (defined by Tiny Tapeout standard)
-# ui_in[7:0]  - 8 dedicated input pins
-# uo_out[7:0] - 8 dedicated output pins  
-# uio[7:0]    - 8 bidirectional I/O pins
+  tiles: "4x2"
+
+# Pinout (Tiny Tapeout standard; documented here for reviewers):
+#   ui_in[7:0]   dedicated inputs:   command + data byte from host
+#   uo_out[7:0]  dedicated outputs:  status + data byte to host
+#   uio[7:0]     bidirectional I/O:  extended data bus / ack
+#   ena          asserted when this design is selected by the harness
+#   clk          10 MHz user clock
+#   rst_n        active-low reset
