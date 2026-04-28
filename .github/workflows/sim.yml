@@ -74,12 +74,11 @@ jobs:
       - name: Run ${{ matrix.test }}
         run: |
           set -euo pipefail
-          # Source OSS CAD Suite environment so libpython/libcocotb resolve.
-          # shellcheck disable=SC1091
-          . /opt/oss-cad-suite/environment
-          # OSS CAD Suite ships its libpython under py3/lib (not lib/);
-          # extend LD_LIBRARY_PATH so vvp can resolve Py_DecodeLocale.
-          export LD_LIBRARY_PATH="/opt/oss-cad-suite/py3/lib:${LD_LIBRARY_PATH:-}"
+          # Use our pinned cocotb (in /opt/venv) instead of the broken cocotb
+          # 2.0.0.dev pre-release that ships with OSS CAD Suite. iverilog/vvp
+          # are Python-agnostic; libcocotb.so resolves libpython via ld.so
+          # default search paths (Ubuntu /usr/lib/x86_64-linux-gnu).
+          export PATH="/opt/venv/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make -f Makefile.vlsi test_${{ matrix.test }}
@@ -145,9 +144,7 @@ jobs:
       - name: Run ${{ matrix.test }} kernel
         run: |
           set -euo pipefail
-          # shellcheck disable=SC1091
-          . /opt/oss-cad-suite/environment
-          export LD_LIBRARY_PATH="/opt/oss-cad-suite/py3/lib:${LD_LIBRARY_PATH:-}"
+          export PATH="/opt/venv/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make test_${{ matrix.test }}
