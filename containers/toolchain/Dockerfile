@@ -68,8 +68,7 @@ ARG VERIBLE_VERSION
 RUN test -n "${VERIBLE_VERSION}" || (echo "VERIBLE_VERSION build-arg required" >&2; exit 1)
 
 RUN set -eu; \
-    VER_NUM="${VERIBLE_VERSION#v}"; \
-    URL="https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VER_NUM}-linux-static-x86_64.tar.gz"; \
+    URL="https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"; \
     echo "Fetching ${URL}"; \
     curl -fsSL --retry 5 --retry-delay 5 -o /tmp/verible.tgz "${URL}"; \
     mkdir -p /opt/verible; \
