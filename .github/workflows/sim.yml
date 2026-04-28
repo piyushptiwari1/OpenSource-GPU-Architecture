@@ -28,6 +28,11 @@ permissions:
 env:
   TOOLCHAIN_IMAGE: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
 
+defaults:
+  run:
+    # Container's /bin/sh is dash; force bash for `set -o pipefail` etc.
+    shell: bash
+
 jobs:
   # ------------------------------------------------------------
   # Per-module unit tests (Makefile.vlsi rules).
