@@ -209,11 +209,7 @@ def build_backend(
 
     here = Path(__file__).resolve().parent
     default_config = here / "configs" / "ddr4_2400.yaml"
-    chosen_path = Path(
-        config_path
-        or os.environ.get("MEM_CONFIG")
-        or default_config
-    )
+    chosen_path = Path(config_path or os.environ.get("MEM_CONFIG") or default_config)
     cfg = load_config(chosen_path)
 
     if chosen_model == "simple":
@@ -222,6 +218,4 @@ def build_backend(
         return _load_ramulator2(cfg)
     if chosen_model == "dramsim3":
         return _load_dramsim3(cfg)
-    raise ValueError(
-        f"unknown MEM_MODEL={chosen_model!r}; expected simple|ramulator2|dramsim3"
-    )
+    raise ValueError(f"unknown MEM_MODEL={chosen_model!r}; expected simple|ramulator2|dramsim3")
