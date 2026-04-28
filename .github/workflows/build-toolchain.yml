@@ -1,0 +1,116 @@
+name: Build toolchain image
+
+# Builds the pinned OSS HDL/EDA toolchain image and pushes it to GHCR.
+# Used by both CI workflows and the .devcontainer.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'containers/toolchain/**'
+      - 'tools/versions.env'
+      - '.github/workflows/build-toolchain.yml'
+  pull_request:
+    paths:
+      - 'containers/toolchain/**'
+      - 'tools/versions.env'
+      - '.github/workflows/build-toolchain.yml'
+  schedule:
+    # Weekly rebuild to pick up CVEs in the base image (Mon 04:17 UTC).
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: build-toolchain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & push toolchain
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load pinned versions
+        id: versions
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . tools/versions.env
+          {
+            echo "oss_cad_suite_date=${OSS_CAD_SUITE_DATE}"
+            echo "oss_cad_suite_arch=${OSS_CAD_SUITE_ARCH}"
+            echo "oss_cad_suite_sha256=${OSS_CAD_SUITE_SHA256:-}"
+            echo "verible_version=${VERIBLE_VERSION}"
+            echo "python_version=${PYTHON_VERSION}"
+            echo "image=${TOOLCHAIN_IMAGE}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.versions.outputs.image }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+            type=sha,format=long,prefix=
+            type=schedule,pattern={{date 'YYYYMMDD'}}
+            type=ref,event=pr
+
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/toolchain/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            OSS_CAD_SUITE_DATE=${{ steps.versions.outputs.oss_cad_suite_date }}
+            OSS_CAD_SUITE_ARCH=${{ steps.versions.outputs.oss_cad_suite_arch }}
+            OSS_CAD_SUITE_SHA256=${{ steps.versions.outputs.oss_cad_suite_sha256 }}
+            VERIBLE_VERSION=${{ steps.versions.outputs.verible_version }}
+            PYTHON_VERSION=${{ steps.versions.outputs.python_version }}
+
+      - name: Smoke test toolchain
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # On PR we --load instead of --push; pick the first tag for the run.
+          tag="$(echo "${{ steps.meta.outputs.tags }}" | head -n1)"
+          docker run --rm "$tag" bash -lc '
+            set -e
+            yosys -V
+            verilator --version
+            iverilog -V | head -n1
+            verible-verilog-format --version
+            python3 -c "import pyslang, cocotb; print(\"pyslang\", pyslang.__name__); print(\"cocotb\", cocotb.__version__)"
+            ruff --version
+            mypy --version
+          '
