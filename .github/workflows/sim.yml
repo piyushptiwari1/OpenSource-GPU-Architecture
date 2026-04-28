@@ -1,0 +1,177 @@
+name: Simulation tests
+
+# Replaces the legacy "GPU Tests" workflow.
+#
+# Strategy:
+#   * Use the pinned OSS toolchain image (built by build-toolchain.yml) so we
+#     get yosys/iverilog/verilator/sv2v/cocotb 2.x without per-job apt installs.
+#   * Run per-module cocotb tests via Makefile.vlsi (each rule wires up the
+#     right SystemVerilog top-level for its testbench).
+#   * Run GPU end-to-end kernel tests (matadd, matmul) via the root Makefile,
+#     whose `test_%` pattern compiles the whole GPU with toplevel=gpu.
+#   * Each matrix cell validates results.xml so a passing run requires that
+#     cocotb actually completed without failures or errors.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: sim-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TOOLCHAIN_IMAGE: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+
+jobs:
+  # ------------------------------------------------------------
+  # Per-module unit tests (Makefile.vlsi rules).
+  # ------------------------------------------------------------
+  module-tests:
+    name: ${{ matrix.test }} (iverilog)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+      options: --user root
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - dcache
+          - shared_memory
+          - barrier
+          - atomic_unit
+          - warp_scheduler
+          - perf_counters
+          - rasterizer
+          - coalescer
+          - pipeline
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          iverilog -V 2>&1 | head -n1 || true
+          sv2v --version || true
+          cocotb-config --version || true
+          python3 --version
+
+      - name: Run ${{ matrix.test }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          rm -f results.xml
+          make -f Makefile.vlsi test_${{ matrix.test }}
+
+      - name: Validate results.xml
+        run: |
+          set -euo pipefail
+          test -f results.xml || { echo "::error::results.xml not produced"; exit 1; }
+          python3 - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse('results.xml').getroot()
+          # cocotb emits a JUnit <testsuites> root with nested <testsuite>.
+          suites = list(root.iter('testsuite'))
+          if not suites:
+              print('::error::no <testsuite> in results.xml', file=sys.stderr)
+              sys.exit(1)
+          fails = sum(int(s.get('failures', 0)) for s in suites)
+          errs  = sum(int(s.get('errors',   0)) for s in suites)
+          tests = sum(int(s.get('tests',    0)) for s in suites)
+          print(f'tests={tests} failures={fails} errors={errs}')
+          sys.exit(1 if fails or errs or not tests else 0)
+          PY
+
+      - name: Upload artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-${{ matrix.test }}
+          path: |
+            results.xml
+            build/**/*.fst
+            build/**/*.vcd
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ------------------------------------------------------------
+  # End-to-end GPU kernel tests (root Makefile).
+  # ------------------------------------------------------------
+  gpu-e2e:
+    name: ${{ matrix.test }} (gpu top, iverilog)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+      options: --user root
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [matadd, matmul]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ${{ matrix.test }} kernel
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          rm -f results.xml
+          make test_${{ matrix.test }}
+
+      - name: Validate results.xml
+        run: |
+          set -euo pipefail
+          test -f results.xml || { echo "::error::results.xml not produced"; exit 1; }
+          python3 - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse('results.xml').getroot()
+          suites = list(root.iter('testsuite'))
+          fails = sum(int(s.get('failures', 0)) for s in suites)
+          errs  = sum(int(s.get('errors',   0)) for s in suites)
+          tests = sum(int(s.get('tests',    0)) for s in suites)
+          print(f'tests={tests} failures={fails} errors={errs}')
+          sys.exit(1 if fails or errs or not tests else 0)
+          PY
+
+      - name: Upload artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-gpu-${{ matrix.test }}
+          path: |
+            results.xml
+            test/runs/**/*
+            build/**/*.fst
+            build/**/*.vcd
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ------------------------------------------------------------
+  # Aggregate gate: passes only if all matrix cells passed.
+  # ------------------------------------------------------------
+  sim-status:
+    name: Simulation status
+    needs: [module-tests, gpu-e2e]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate
+        run: |
+          set -euo pipefail
+          mt='${{ needs.module-tests.result }}'
+          ee='${{ needs.gpu-e2e.result }}'
+          echo "module-tests: $mt"
+          echo "gpu-e2e:      $ee"
+          if [ "$mt" != "success" ] || [ "$ee" != "success" ]; then
+            echo "::error::one or more simulation jobs failed"
+            exit 1
+          fi
