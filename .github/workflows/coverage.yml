@@ -1,0 +1,189 @@
+name: Coverage
+
+# C-7: line/branch coverage for the C++ reference simulator + Python
+# tooling, uploaded to Codecov.
+#
+# Two flags are reported separately so coverage gaps in either side
+# are visible:
+#   * cpp     - gcov data from sim/cppref (Catch2 tests + refsim binary)
+#   * python  - coverage.py from tools/asm + tools/tinygrad_opengpu +
+#               tools/difftest + tools/codegen + bench tests.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sim/cppref/**"
+      - "tools/**"
+      - "bench/**"
+      - "docs/isa/instructions.yaml"
+      - ".github/workflows/coverage.yml"
+  pull_request:
+    paths:
+      - "sim/cppref/**"
+      - "tools/**"
+      - "bench/**"
+      - "docs/isa/instructions.yaml"
+      - ".github/workflows/coverage.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cpp:
+    name: C++ refsim (gcov)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+              cmake ninja-build gcovr lcov
+
+      - name: Configure (Debug + coverage)
+        working-directory: sim/cppref
+        run: |
+          set -euo pipefail
+          cmake -B build -S . -G Ninja \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DOPENGPU_REFSIM_COVERAGE=ON \
+                -DOPENGPU_REFSIM_WERROR=ON
+
+      - name: Build
+        working-directory: sim/cppref
+        run: cmake --build build -j
+
+      - name: Run Catch2 tests
+        working-directory: sim/cppref/build
+        run: ctest --output-on-failure
+
+      - name: Drive refsim through bench programs (extra coverage)
+        working-directory: sim/cppref/build
+        run: |
+          set -euo pipefail
+          # Touch additional CLI paths: --trace, --mem-dump, --max-steps.
+          mkdir -p /tmp/cov
+          # Smallest hand-written program: write 0xCA -> mem[0], halt.
+          # 4 words, 16 bits each, big-endian.
+          printf '9100\n92ca\n8210\nf000\n' > /tmp/cov/p.hex
+          ./opengpu-refsim --program /tmp/cov/p.hex --threads 1 --blocks 1 \
+              --trace /tmp/cov/trace.jsonl --mem-dump /tmp/cov/mem.hex
+          test -s /tmp/cov/trace.jsonl
+          test -s /tmp/cov/mem.hex
+
+      - name: Generate lcov report
+        working-directory: sim/cppref
+        run: |
+          set -euo pipefail
+          # Ignore mismatch warnings from system headers; --rc lets us
+          # tolerate negative-branch-counts that gcc-13 sometimes emits.
+          lcov --capture --directory build --output-file coverage.info \
+               --rc geninfo_unexecuted_blocks=1 \
+               --rc branch_coverage=1 \
+               --ignore-errors mismatch,negative,gcov,inconsistent \
+               --quiet
+          # Drop test scaffolding + Catch2 fetched sources from the report.
+          lcov --remove coverage.info \
+               '*/_deps/*' '*/tests/*' '/usr/*' \
+               --output-file coverage.info \
+               --ignore-errors unused \
+               --quiet
+          lcov --list coverage.info
+
+      - name: Upload to Codecov (cpp flag)
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: sim/cppref/coverage.info
+          flags: cpp
+          name: cpp-refsim
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  python:
+    name: Python tooling (coverage.py)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build + Python deps
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends cmake ninja-build
+          pip install \
+              "pyyaml>=6.0" "jinja2>=3.1" "pytest>=8" \
+              "coverage[toml]>=7.5"
+
+      - name: Build refsim (Release, no coverage)
+        working-directory: sim/cppref
+        run: |
+          set -euo pipefail
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j --target opengpu-refsim
+
+      - name: Run pytest under coverage
+        run: |
+          set -euo pipefail
+          coverage run --rcfile=pyproject.toml \
+              -m pytest tools/asm/tests \
+                        tools/difftest/tests \
+                        tools/tinygrad_opengpu/tests \
+                        -q
+          # tools/codegen has no unit tests yet; exercise it via the
+          # idempotency CLI so its lines are at least executed.
+          coverage run --rcfile=pyproject.toml --append \
+              -m tools.codegen.regen --check
+          coverage run --rcfile=pyproject.toml --append \
+              -m bench.run_all
+          coverage xml -o coverage.xml
+          coverage report --skip-empty | tail -40
+
+      - name: Upload to Codecov (python flag)
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: python
+          name: python-tooling
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-status:
+    name: Coverage status
+    runs-on: ubuntu-24.04
+    needs: [cpp, python]
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          set -euo pipefail
+          a='${{ needs.cpp.result }}'
+          b='${{ needs.python.result }}'
+          echo "cpp:    $a"
+          echo "python: $b"
+          if [ "$a" != "success" ] || [ "$b" != "success" ]; then
+            echo "::error::coverage jobs failed"
+            exit 1
+          fi

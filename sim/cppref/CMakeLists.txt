@@ -12,6 +12,7 @@ endif()
 
 option(OPENGPU_REFSIM_TESTS  "Build refsim Catch2 tests" ON)
 option(OPENGPU_REFSIM_WERROR "Treat warnings as errors"  ON)
+option(OPENGPU_REFSIM_COVERAGE "Build with gcov coverage instrumentation" OFF)
 
 add_library(opengpu_warnings INTERFACE)
 target_compile_options(opengpu_warnings INTERFACE
@@ -20,6 +21,12 @@ target_compile_options(opengpu_warnings INTERFACE
     -Wformat=2)
 if(OPENGPU_REFSIM_WERROR)
     target_compile_options(opengpu_warnings INTERFACE -Werror)
+endif()
+if(OPENGPU_REFSIM_COVERAGE)
+    # gcov-compatible instrumentation; works with both gcc and clang via
+    # --coverage. lcov/gcovr post-process the produced .gcda/.gcno pairs.
+    target_compile_options(opengpu_warnings INTERFACE --coverage -O0 -g)
+    target_link_options   (opengpu_warnings INTERFACE --coverage)
 endif()
 
 add_library(opengpu_refsim STATIC
