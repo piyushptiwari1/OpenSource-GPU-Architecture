@@ -62,7 +62,7 @@ jobs:
           # Tracked as a follow-up RTL/test fix.
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Tool versions
         run: |
@@ -144,7 +144,7 @@ jobs:
         test: [matadd, matmul]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Tool versions
         run: |
