@@ -29,7 +29,7 @@ SV2V ?= $(if $(wildcard ./sv2v/sv2v),./sv2v/sv2v,sv2v)
 compile:
 	mkdir -p build
 	make compile_alu
-	$(SV2V) -I src/* -w build/gpu.v
+	$(SV2V) -I src -w build/gpu.v $(wildcard src/*.sv)
 	echo "" >> build/gpu.v
 	cat build/alu.v >> build/gpu.v
 	echo '`timescale 1ns/1ns' > build/temp.v
