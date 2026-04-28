@@ -74,3 +74,6 @@ env/
 *.tmp
 *.bak
 *.orig
+
+# SymbiYosys workdirs (named after the .sby task)
+formal/*/[a-z]*/
