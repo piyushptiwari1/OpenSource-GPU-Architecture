@@ -24,7 +24,7 @@ test_%:
 # Path to sv2v: prefer vendored binary if present (for users without OSS
 # CAD Suite installed), otherwise fall back to whatever is on PATH (e.g.
 # the toolchain container ships sv2v in /opt/oss-cad-suite/bin).
-SV2V := $(shell if [ -x ./sv2v/sv2v ]; then echo ./sv2v/sv2v; else command -v sv2v; fi)
+SV2V ?= $(if $(wildcard ./sv2v/sv2v),./sv2v/sv2v,sv2v)
 
 compile:
 	mkdir -p build
