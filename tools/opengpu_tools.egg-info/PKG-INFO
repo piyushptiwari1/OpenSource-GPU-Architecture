@@ -1,3 +1,75 @@
+Metadata-Version: 2.4
+Name: opengpu-tools
+Version: 0.1.0
+Summary: Tooling (assembler codegen, ISA spec, runtime helpers) for the OpenSource-GPU-Architecture project.
+Author: Piyush Tiwari, Adam Majmudar
+License: MIT License
+        
+        Copyright (c) 2024 Adam Majmudar (original tiny-gpu author)
+        Copyright (c) 2026 Piyush Tiwari (OpenSource GPU Architecture maintainer)
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        
+Project-URL: Homepage, https://github.com/piyushptiwari1/OpenSource-GPU-Architecture
+Project-URL: Repository, https://github.com/piyushptiwari1/OpenSource-GPU-Architecture
+Project-URL: Issues, https://github.com/piyushptiwari1/OpenSource-GPU-Architecture/issues
+Project-URL: Documentation, https://piyushptiwari1.github.io/OpenSource-GPU-Architecture/
+Keywords: gpu,gpgpu,systemverilog,simt,cocotb,openlane,yosys
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: cocotb<3.0,>=2.0
+Requires-Dist: cocotb-bus>=0.2.1
+Requires-Dist: cocotbext-axi>=0.1.24
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: jinja2>=3.1
+Requires-Dist: click>=8.1
+Requires-Dist: rich>=13.7
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-xdist>=3.5; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Requires-Dist: ruff>=0.6; extra == "dev"
+Requires-Dist: mypy>=1.10; extra == "dev"
+Requires-Dist: types-PyYAML; extra == "dev"
+Requires-Dist: pip-audit>=2.7; extra == "dev"
+Requires-Dist: pre-commit>=3.7; extra == "dev"
+Provides-Extra: docs
+Requires-Dist: mkdocs>=1.6; extra == "docs"
+Requires-Dist: mkdocs-material>=9.5; extra == "docs"
+Requires-Dist: mkdocstrings[python]>=0.25; extra == "docs"
+Requires-Dist: mike>=2.1; extra == "docs"
+Provides-Extra: ml
+Requires-Dist: numpy>=1.26; extra == "ml"
+Requires-Dist: tinygrad>=0.9; extra == "ml"
+Requires-Dist: safetensors>=0.4; extra == "ml"
+Dynamic: license-file
+
 # Open Source GPU Architecture
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -347,7 +419,7 @@ Once the prerequisites are in place, run the kernel simulations with `make test_
 
 - The default `Makefile` targets the iverilog + cocotb v2.x flow (`COCOTB_TEST_MODULES`, `cocotb-config --lib-dir`, `unit="ns"`). Tested on Ubuntu 22.04 with iverilog 11+.
 - For commercial simulators (VCS / Questa / Xcelium) use `make -f Makefile.sv ...` to drive the SystemVerilog sources directly without sv2v.
-- For full ASIC / SoC build flows (synthesis, DFT, floorplan, UPF) see `flow/commercial/` (Synopsys/Cadence/Vivado/Quartus, gated on `OPENGPU_COMMERCIAL=1`) or `flow/openlane2/` for the open sky130 path.
+- For full ASIC / SoC build flows (synthesis, DFT, floorplan, UPF) see `Makefile.vlsi`.
 
 Executing the simulations will output a log file with the initial data memory state, complete execution trace of the kernel, and final data memory state.
 

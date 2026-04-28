@@ -437,89 +437,17 @@ test_production_unit_tests: test_command_processor test_geometry_engine test_ren
 	@echo "=============================================="
 
 ################################################################################
-# VLSI/ASIC Production Targets
+# Commercial / proprietary EDA flow targets
+#
+# The asic_* and fpga_xilinx*/fpga_intel* targets formerly defined here
+# moved to flow/commercial/Makefile in C-10 (the public CI does not
+# carry vendor licenses; commercial targets are gated behind
+# OPENGPU_COMMERCIAL=1). Use:
+#   make -C flow/commercial asic_synth      # Synopsys/Cadence
+#   make -C flow/commercial fpga_xilinx     # Vivado
+#   make -C flow/commercial fpga_intel      # Quartus Prime Pro
+# See flow/commercial/README.md for activation instructions.
 ################################################################################
-
-.PHONY: asic_lint asic_synth asic_pnr asic_signoff asic_gds
-
-# Lint check with Verilator
-asic_lint:
-	@echo "Running lint checks..."
-	verilator --lint-only -Wall -Wno-fatal src/gpu_soc.sv src/*.sv
-
-# Synthesis (requires Synopsys DC or Cadence Genus)
-asic_synth:
-	@echo "Running ASIC synthesis..."
-	@echo "Prerequisites: Synopsys Design Compiler or Cadence Genus"
-	@echo "Run: dc_shell -f vlsi/scripts/synthesis.tcl"
-	@if [ -f vlsi/scripts/synthesis.tcl ]; then \
-		echo "Synthesis script found at vlsi/scripts/synthesis.tcl"; \
-	else \
-		echo "Create synthesis script at vlsi/scripts/synthesis.tcl"; \
-	fi
-
-# Place and Route
-asic_pnr:
-	@echo "Running ASIC place and route..."
-	@echo "Prerequisites: Synopsys ICC2 or Cadence Innovus"
-	@echo "Run: icc2_shell -f vlsi/scripts/pnr.tcl"
-
-# Signoff checks
-asic_signoff:
-	@echo "Running signoff checks..."
-	@echo "Prerequisites: Synopsys PrimeTime, StarRC"
-	@echo "Run: pt_shell -f vlsi/scripts/signoff.tcl"
-
-# GDSII generation
-asic_gds:
-	@echo "Generating GDSII..."
-	@echo "Run: streamout from ICC2/Innovus"
-
-################################################################################
-# FPGA Production Targets
-################################################################################
-
-.PHONY: fpga_xilinx fpga_intel fpga_xilinx_program fpga_intel_program
-
-# Xilinx Vivado build
-fpga_xilinx:
-	@echo "Building for Xilinx FPGA..."
-	@echo "Target: Ultrascale+ (VU9P/VU13P)"
-	@if command -v vivado >/dev/null 2>&1; then \
-		echo "Vivado found, starting build..."; \
-		vivado -mode batch -source fpga/xilinx/scripts/build.tcl; \
-	else \
-		echo "Vivado not found. Install Xilinx Vivado 2023.x"; \
-	fi
-
-# Xilinx programming
-fpga_xilinx_program:
-	@echo "Programming Xilinx FPGA..."
-	@if command -v vivado >/dev/null 2>&1; then \
-		vivado -mode batch -source fpga/xilinx/scripts/program.tcl; \
-	else \
-		echo "Vivado not found"; \
-	fi
-
-# Intel Quartus build
-fpga_intel:
-	@echo "Building for Intel FPGA..."
-	@echo "Target: Agilex / Stratix 10"
-	@if command -v quartus_sh >/dev/null 2>&1; then \
-		echo "Quartus found, starting build..."; \
-		quartus_sh --flow compile fpga/intel/gpu_project; \
-	else \
-		echo "Quartus not found. Install Intel Quartus Prime Pro 23.x"; \
-	fi
-
-# Intel programming
-fpga_intel_program:
-	@echo "Programming Intel FPGA..."
-	@if command -v quartus_pgm >/dev/null 2>&1; then \
-		quartus_pgm -c 1 -m jtag -o "p;fpga/intel/output_files/gpu_soc.sof"; \
-	else \
-		echo "Quartus not found"; \
-	fi
 
 ################################################################################
 # FPGA Wrapper Build
@@ -559,9 +487,10 @@ production_check: build_all test_all
 	@echo "Build: PASS"
 	@echo "Tests: PASS"
 	@echo ""
-	@echo "Next steps:"
-	@echo "1. ASIC: make asic_lint && make asic_synth"
-	@echo "2. FPGA: make fpga_xilinx or make fpga_intel"
+	@echo "Next steps (commercial flow, see flow/commercial/):"
+	@echo "1. ASIC: make -C flow/commercial asic_lint && make -C flow/commercial asic_synth"
+	@echo "2. FPGA: make -C flow/commercial fpga_xilinx (Vivado) or fpga_intel (Quartus)"
+	@echo "Open flow alternatives: flow/openlane2/ (sky130) and flow/fpga/ (Yosys+nextpnr)."
 	@echo "=============================================="
 
 ################################################################################
@@ -617,15 +546,17 @@ help:
 	@echo "  make compile        - Compile core GPU"
 	@echo "  make build_all      - Build all modules"
 	@echo ""
-	@echo "ASIC targets:"
-	@echo "  make asic_lint      - Run lint checks"
-	@echo "  make asic_synth     - Run synthesis"
-	@echo "  make asic_pnr       - Place and route"
-	@echo "  make asic_signoff   - Signoff checks"
+	@echo "Commercial ASIC / FPGA targets (see flow/commercial/):"
+	@echo "  make -C flow/commercial asic_lint   - Run lint checks (open)"
+	@echo "  make -C flow/commercial asic_synth  - Synopsys DC / Cadence Genus (license)"
+	@echo "  make -C flow/commercial asic_pnr    - Synopsys ICC2 / Cadence Innovus (license)"
+	@echo "  make -C flow/commercial fpga_xilinx - Xilinx Vivado (license for paid features)"
+	@echo "  make -C flow/commercial fpga_intel  - Intel Quartus Prime Pro (license)"
+	@echo "  Set OPENGPU_COMMERCIAL=1 to enable commercial gates."
 	@echo ""
-	@echo "FPGA targets:"
-	@echo "  make fpga_xilinx    - Build for Xilinx"
-	@echo "  make fpga_intel     - Build for Intel"
+	@echo "Open flow alternatives:"
+	@echo "  flow/openlane2/  - sky130A ASIC flow (no license)"
+	@echo "  flow/fpga/       - Yosys + nextpnr (ULX3S, Tang Nano 20K, ...)"
 	@echo ""
 	@echo "Other:"
 	@echo "  make docs           - Show documentation"

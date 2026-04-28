@@ -49,5 +49,5 @@ Out of scope:
   released.
 - Issues that require a malicious PDK, compromised toolchain image, or
   physical access to the device.
-- Findings against the `Makefile.vlsi` commercial flow (not part of
-  the supported open path).
+- Findings against the commercial flow under `flow/commercial/` (not
+  part of the supported open path; gated on `OPENGPU_COMMERCIAL=1`).

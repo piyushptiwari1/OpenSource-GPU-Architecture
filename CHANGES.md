@@ -34,7 +34,9 @@ preferred the fix that kept the test suite green:
 - The unified `Makefile` keeps timestamped test output, FST/VCD waveform
   generation, and a `MODULE=` override.
 - PR #55's heavy synthesis/SoC build script is preserved as `Makefile.vlsi`
-  rather than overwriting the simulation flow.
+  for the per-module simulation rules; the commercial ASIC/FPGA targets
+  (Synopsys/Cadence/Vivado/Quartus) live under `flow/commercial/` and are
+  gated on `OPENGPU_COMMERCIAL=1` (C-10).
 
 ## Issues addressed
 

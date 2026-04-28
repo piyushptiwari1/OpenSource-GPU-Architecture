@@ -1,0 +1,68 @@
+name: Commercial flow
+
+# C-10: syntax-only validation of the commercial EDA flow.
+#
+# Public CI never has Synopsys/Cadence/Vivado/Quartus licenses, so this
+# job only validates that flow/commercial/Makefile parses and that the
+# OPENGPU_COMMERCIAL guard refuses to run without opt-in. Real
+# commercial runs happen exclusively on self-hosted runners belonging
+# to users with the appropriate license entitlements.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "flow/commercial/**"
+      - ".github/workflows/commercial.yml"
+  pull_request:
+    paths:
+      - "flow/commercial/**"
+      - ".github/workflows/commercial.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  syntax:
+    name: Makefile syntax + guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: help target prints
+        run: make -C flow/commercial -n help
+
+      - name: dry-run all gated targets
+        env:
+          OPENGPU_COMMERCIAL: "1"
+        run: |
+          set -euo pipefail
+          for t in asic_synth asic_pnr asic_signoff asic_gds \
+                   fpga_xilinx fpga_xilinx_program \
+                   fpga_intel  fpga_intel_program; do
+            echo "::group::dry-run $t"
+            make -C flow/commercial -n "$t"
+            echo "::endgroup::"
+          done
+
+      - name: guard refuses without opt-in
+        run: |
+          set -euo pipefail
+          # Expect a non-zero exit and the explicit error message.
+          if make -C flow/commercial asic_synth >out.txt 2>&1; then
+            echo "::error::guard did not refuse asic_synth without OPENGPU_COMMERCIAL=1"
+            cat out.txt
+            exit 1
+          fi
+          if ! grep -q "commercial flow not enabled" out.txt; then
+            echo "::error::expected guard error message not found"
+            cat out.txt
+            exit 1
+          fi
+          echo "guard refused as expected"

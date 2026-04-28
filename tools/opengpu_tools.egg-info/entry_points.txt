@@ -1,0 +1,3 @@
+[console_scripts]
+opengpu-asm = opengpu_tools.asm:main
+opengpu-isa = opengpu_tools.isa_codegen:main
