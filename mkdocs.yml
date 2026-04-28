@@ -1,0 +1,147 @@
+site_name: OpenGPU
+site_description: >-
+  Open-source 16-bit SIMT GPU architecture — RTL, reference simulator,
+  ISA spec, and toolchain.
+site_url: https://piyushptiwari1.github.io/OpenSource-GPU-Architecture/
+repo_url: https://github.com/piyushptiwari1/OpenSource-GPU-Architecture
+repo_name: piyushptiwari1/OpenSource-GPU-Architecture
+edit_uri: edit/main/docs/
+
+# `docs/` is also the source of truth for several files (the canonical
+# ISA YAML, the per-module module docs).  We keep mkdocs pointing at
+# the same directory and use the ISA codegen + nav to expose a curated
+# reading order.
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - content.action.view
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/piyushptiwari1/OpenSource-GPU-Architecture
+  version:
+    provider: mike
+    default: latest
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            docstring_style: numpy
+            members_order: source
+            filters: ["!^_"]
+
+# `gen-files`/`literate-nav`-style codegen: the ISA reference page is
+# rendered from docs/isa/instructions.yaml at build time by
+# tools/codegen/render_isa_md.py, which runs as part of the docs CI
+# pipeline (and the local `make docs-isa` shortcut).
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: report/02-architecture-and-execution.md
+      - Index: report/README.md
+      - Repository structure: report/01-repository-structure.md
+      - Build & test workflow: report/03-build-and-test-workflow.md
+      - matadd trace walkthrough: report/05-matadd-trace-walkthrough.md
+      - matmul trace walkthrough: report/06-matmul-trace-walkthrough.md
+      - Risks & open questions: report/04-risks-open-questions.md
+      - Executive overview: report/00-executive-overview.md
+  - ISA:
+      - Reference: isa/reference.md
+  - Modules:
+      - Index: modules/README.md
+      - alu: modules/alu.md
+      - controller: modules/controller.md
+      - core: modules/core.md
+      - dcr: modules/dcr.md
+      - decoder: modules/decoder.md
+      - dispatch: modules/dispatch.md
+      - fetcher: modules/fetcher.md
+      - gpu: modules/gpu.md
+      - lsu: modules/lsu.md
+      - pc: modules/pc.md
+      - registers: modules/registers.md
+      - scheduler: modules/scheduler.md
+  - Simulation:
+      - Verilog simulation: setup-verilog-simulation.md
+      - cocotb overview: cocotb-overview.md
+      - C++ refsim: refsim/index.md
+  - Tooling:
+      - Codegen: tooling/codegen.md
+      - DiffTest: tooling/difftest.md
+  - Changelog: changelog.md
+
+watch:
+  - tools/codegen
+  - tools/difftest
+  - sim/cppref/include
+  - docs/isa/instructions.yaml

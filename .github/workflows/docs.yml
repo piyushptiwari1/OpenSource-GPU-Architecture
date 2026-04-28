@@ -1,0 +1,111 @@
+name: Docs
+
+# Builds the mkdocs-material site and publishes it to GitHub Pages.
+#
+# * Pull requests: build only (with --strict). Catches broken links,
+#   nav drift, and stale ISA reference before merge.
+# * push to main: build + deploy to gh-pages branch via mike (latest alias).
+#
+# `python -m tools.codegen.regen --check` is also run here so the site
+# never publishes a stale auto-generated ISA reference page.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # required for mike to push to gh-pages
+  pages: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build:
+    name: build (--strict)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed by mike for branch operations
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install docs deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "mkdocs>=1.6" \
+            "mkdocs-material>=9.5" \
+            "mkdocstrings[python]>=0.25" \
+            "mike>=2.1" \
+            "pymdown-extensions>=10.7" \
+            "jinja2>=3.1" \
+            "pyyaml>=6.0"
+
+      - name: ISA codegen --check (incl. docs/isa/reference.md)
+        run: python -m tools.codegen.regen --check
+
+      - name: mkdocs build --strict
+        run: mkdocs build --strict
+
+      - name: Upload site artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-${{ github.sha }}
+          path: site
+          retention-days: 7
+
+  deploy:
+    name: deploy (gh-pages, mike latest)
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install docs deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "mkdocs>=1.6" \
+            "mkdocs-material>=9.5" \
+            "mkdocstrings[python]>=0.25" \
+            "mike>=2.1" \
+            "pymdown-extensions>=10.7" \
+            "jinja2>=3.1" \
+            "pyyaml>=6.0"
+
+      - name: Configure git for mike
+        run: |
+          git config --global user.name  'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Deploy with mike (latest alias)
+        run: |
+          # `latest` always tracks main; tagged releases will publish a
+          # versioned alias in a future release workflow.
+          mike deploy --push --update-aliases latest
+          mike set-default --push latest

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from . import isa_loader
+from . import isa_loader, render_isa_md
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ISA_YAML = REPO_ROOT / "docs" / "isa" / "instructions.yaml"
@@ -59,6 +59,9 @@ def _render_all() -> dict[Path, str]:
     for tgt in TARGETS:
         template = env.get_template(tgt.template)
         rendered[tgt.output] = template.render(isa=isa, source_sha256=source_sha256)
+
+    # Markdown ISA reference is rendered programmatically (no Jinja).
+    rendered[render_isa_md.OUTPUT] = render_isa_md.render(ISA_YAML)
     return rendered
 
 
