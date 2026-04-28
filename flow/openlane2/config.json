@@ -1,0 +1,49 @@
+{
+    "DESIGN_NAME": "gpu",
+    "VERILOG_FILES": [
+        "dir::../../src/alu.sv",
+        "dir::../../src/controller.sv",
+        "dir::../../src/core.sv",
+        "dir::../../src/dcr.sv",
+        "dir::../../src/decoder.sv",
+        "dir::../../src/dispatch.sv",
+        "dir::../../src/fetcher.sv",
+        "dir::../../src/gpu.sv",
+        "dir::../../src/lsu.sv",
+        "dir::../../src/pc.sv",
+        "dir::../../src/registers.sv",
+        "dir::../../src/scheduler.sv"
+    ],
+
+    "CLOCK_PORT": "clk",
+    "CLOCK_NET":  "clk",
+    "CLOCK_PERIOD": 50.0,
+
+    "_comment_pdk": "Sky130A high-density, 1.8V; ASAP-style hardening.",
+    "PDK": "sky130A",
+    "STD_CELL_LIBRARY": "sky130_fd_sc_hd",
+    "TARGET_DENSITY_PCT": 50,
+
+    "_comment_dev": "tiny-gpu has unpacked-array module ports; OpenLane2 runs sv2v automatically when USE_SYNLIG is off.",
+    "USE_SYNLIG": false,
+
+    "_comment_floorplan": "Auto-floorplan; tiny design fits comfortably under 600x600 um.",
+    "FP_SIZING": "absolute",
+    "DIE_AREA":  "0 0 600 600",
+    "FP_CORE_UTIL": 35,
+
+    "RUN_HEURISTIC_DIODE_INSERTION": true,
+    "DIODE_ON_PORTS": "in",
+
+    "_comment_synthesis_strategy": "AREA 0 = minimum area; switch to DELAY 0 once timing closure work begins.",
+    "SYNTH_STRATEGY": "AREA 0",
+
+    "_comment_signoff": "STA across slow/typ/fast corners; Magic + Netgen LVS.",
+    "RUN_LINTER": true,
+    "RUN_CVC": false,
+
+    "meta": {
+        "version": 2,
+        "flow": "Classic"
+    }
+}

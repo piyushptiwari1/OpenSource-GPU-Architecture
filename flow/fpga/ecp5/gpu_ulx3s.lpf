@@ -1,0 +1,13 @@
+# ECP5 (Lattice ECP5 25F / 45F) constraints — ULX3S board pinout.
+# Adjust for your specific board.
+
+LOCATE COMP "clk"         SITE "G2";   IOBUF PORT "clk"         IO_TYPE=LVCMOS33;
+FREQUENCY PORT "clk" 25 MHZ;
+
+LOCATE COMP "rst_n"       SITE "R1";   IOBUF PORT "rst_n"       IO_TYPE=LVCMOS33;
+LOCATE COMP "button_start" SITE "M3";  IOBUF PORT "button_start" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "led[0]"      SITE "B2";   IOBUF PORT "led[0]"      IO_TYPE=LVCMOS33;
+LOCATE COMP "led[1]"      SITE "C2";   IOBUF PORT "led[1]"      IO_TYPE=LVCMOS33;
+LOCATE COMP "led[2]"      SITE "C1";   IOBUF PORT "led[2]"      IO_TYPE=LVCMOS33;
+LOCATE COMP "led[3]"      SITE "D2";   IOBUF PORT "led[3]"      IO_TYPE=LVCMOS33;

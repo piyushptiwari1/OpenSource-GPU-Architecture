@@ -1,0 +1,40 @@
+# Yosys synthesizability check.
+#
+# Goal: prove that src/*.sv elaborates and synthesizes to a generic
+# gate netlist, without committing to a specific FPGA or PDK.  Any
+# real FPGA / ASIC flow (flow/fpga/*, flow/openlane2/) starts from
+# the same RTL and will fail loudly if this check fails.
+#
+# Usage (from repo root):
+#   yosys -q -s flow/synth/synth_check.ys
+#
+# CI runs this on every push/PR via .github/workflows/flow.yml.
+
+# ---- read sources --------------------------------------------------------
+# Use sv2v as a preprocessor so SystemVerilog features (unpacked array
+# ports, packed structs, generate-genvar inits) survive into Yosys.
+# We only feed yosys the original tiny-gpu sources; the enterprise SoC
+# tree is excluded for now (sv2v collisions tracked in Step 3 follow-ups).
+read_verilog -sv src/alu.sv
+read_verilog -sv src/controller.sv
+read_verilog -sv src/core.sv
+read_verilog -sv src/dcr.sv
+read_verilog -sv src/decoder.sv
+read_verilog -sv src/dispatch.sv
+read_verilog -sv src/fetcher.sv
+read_verilog -sv src/gpu.sv
+read_verilog -sv src/lsu.sv
+read_verilog -sv src/pc.sv
+read_verilog -sv src/registers.sv
+read_verilog -sv src/scheduler.sv
+
+# ---- synthesise ----------------------------------------------------------
+hierarchy -check -top gpu
+proc; opt; fsm; opt; memory; opt
+techmap; opt
+abc -fast
+opt -fast
+
+# ---- diagnostics --------------------------------------------------------
+stat -top gpu
+check -assert

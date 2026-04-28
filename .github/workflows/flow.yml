@@ -1,0 +1,145 @@
+name: Physical flow
+
+# Runs synthesizability + open-source FPGA place-and-route checks on
+# the tiny-gpu RTL, using the pinned toolchain image
+# (yosys / nextpnr-ice40 / nextpnr-ecp5 / icepack / ecppack from OSS
+# CAD Suite).
+#
+# Three jobs:
+#   * synth-check         (always on)  -> yosys generic synth, fast.
+#   * fpga-pnr (matrix)   (dispatch)   -> ice40 + ecp5 place-and-route.
+#                                         Reports LUT/FF/BRAM utilisation
+#                                         and uploads bitstream + reports
+#                                         as artefacts.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "flow/synth/**"
+      - "flow/fpga/**"
+      - ".github/workflows/flow.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "flow/synth/**"
+      - "flow/fpga/**"
+      - ".github/workflows/flow.yml"
+  workflow_dispatch:
+    inputs:
+      run_pnr:
+        description: "Also run nextpnr place-and-route (slow)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: flow-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TOOLCHAIN_IMAGE: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+
+jobs:
+  # ------------------------------------------------------------
+  # Synthesizability gate.  Reads every src/*.sv (originals) and
+  # confirms `gpu` elaborates + synthesizes to a generic netlist.
+  # ------------------------------------------------------------
+  synth-check:
+    name: yosys synth-check (gpu top)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+      options: --user root
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          # Use OSS CAD Suite's yosys (system-installed iverilog only
+          # matters for cocotb).
+          export PATH="/opt/oss-cad-suite/bin:$PATH"
+          which yosys && yosys -V | head -n1
+          which nextpnr-ice40 && nextpnr-ice40 --version | head -n1 || true
+          which nextpnr-ecp5  && nextpnr-ecp5 --version  | head -n1 || true
+
+      - name: yosys synth_check
+        run: |
+          set -euo pipefail
+          export PATH="/opt/oss-cad-suite/bin:$PATH"
+          mkdir -p flow/synth/build
+          yosys -q -l flow/synth/build/yosys.log \
+                -s flow/synth/synth_check.ys
+
+      - name: Upload synth log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synth-check-log
+          path: flow/synth/build/yosys.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ------------------------------------------------------------
+  # Open-source FPGA P&R.  Only on workflow_dispatch (slow-ish).
+  # ------------------------------------------------------------
+  fpga-pnr:
+    name: ${{ matrix.target }} place-and-route
+    if: github.event_name == 'workflow_dispatch' && inputs.run_pnr == 'true'
+    needs: synth-check
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
+      options: --user root
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ice40
+            make_dir: flow/fpga/ice40
+            artefacts: build/gpu_fpga_top.bin build/yosys.log build/nextpnr.log build/gpu_fpga_top.timing.rpt
+          - target: ecp5
+            make_dir: flow/fpga/ecp5
+            artefacts: build/gpu_fpga_top.bit build/yosys.log build/nextpnr.log
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (${{ matrix.target }})
+        run: |
+          set -euo pipefail
+          export PATH="/opt/oss-cad-suite/bin:$PATH"
+          make -C ${{ matrix.make_dir }} all
+
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fpga-${{ matrix.target }}
+          path: |
+            ${{ matrix.make_dir }}/build/*
+          if-no-files-found: ignore
+          retention-days: 14
+
+  flow-status:
+    name: Flow status
+    needs: [synth-check]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          set -euo pipefail
+          mt='${{ needs.synth-check.result }}'
+          echo "synth-check: $mt"
+          if [ "$mt" != "success" ]; then
+            echo "::error::synth check failed"
+            exit 1
+          fi

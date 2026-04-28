@@ -1,0 +1,17 @@
+# iCE40HX8K-CT256 (HX8K Breakout Board) pin constraints.
+# Adjust for your specific board.
+
+# 12 MHz onboard oscillator
+set_io clk         J3
+
+# Active-low reset button (S2)
+set_io rst_n       R9
+
+# Push-button start (S1)
+set_io button_start K11
+
+# Status LEDs D1..D4
+set_io led[0] B5
+set_io led[1] B4
+set_io led[2] A2
+set_io led[3] A1

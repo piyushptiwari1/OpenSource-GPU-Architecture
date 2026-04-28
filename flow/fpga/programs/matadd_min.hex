@@ -1,0 +1,11 @@
+// Tiny program: write 0xCA to data[0] and halt.
+// Hand-assembled (matches docs/isa/instructions.yaml).
+//
+//   CONST R1, #0      -> 9100
+//   CONST R2, #0xCA   -> 92CA
+//   STR   R1, R2      -> 8210
+//   RET               -> F000
+9100
+92CA
+8210
+F000

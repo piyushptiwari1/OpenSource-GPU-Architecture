@@ -133,11 +133,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-"""Render the canonical ISA YAML to a Markdown reference page.
-
-Output:  docs/isa/reference.md  (consumed by mkdocs build).
-
-This page is *generated*; CI re-runs the renderer and fails if the
-checked-in copy drifts (mirrors the codegen --check pattern used for
-the C++ table and the customasm ruleset).
-"""

@@ -1,0 +1,7 @@
+// Initial data memory contents.  Tiny program above only writes to
+// data[0]; the rest is initialised to 0 so post-mortem inspection of
+// the BRAM is unambiguous.
+00
+00
+00
+00
