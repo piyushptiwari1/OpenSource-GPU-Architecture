@@ -271,6 +271,29 @@ instructions:
       pc_mux: 0
       ret: 0
 
+  # Compare-and-swap (test-and-set variant). The thread reads
+  # mem[Rs]; if old == 0 it writes Rt back, otherwise mem[Rs] is
+  # left unchanged. Either way Rd <- old. The 'expected' operand is
+  # implicitly zero so the instruction fits R-type's three-operand
+  # encoding while still enabling spinlock acquire and once-only
+  # claim patterns. Atomicity guarantees match ATOMICADD: the
+  # memory controller holds an address lock for the entire RMW.
+  - mnemonic: ATOMICCAS
+    opcode: 0xB
+    type: R
+    syntax: "ATOMICCAS Rd, Rs, Rt"
+    semantics: "old = mem[Rs]; if old == 0 then mem[Rs] <- Rt; Rd <- old"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 1
+      mem_write_enable: 1
+      nzp_write_enable: 0
+      reg_input_mux: 1
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
   - mnemonic: RET
     opcode: 0xF
     type: Z
