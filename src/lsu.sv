@@ -37,6 +37,16 @@ module lsu (
 );
     localparam IDLE = 2'b00, REQUESTING = 2'b01, WAITING = 2'b10, DONE = 2'b11;
 
+    // ATOMICADD asserts both mem_read and mem_write. The atomic path
+    // sequences read-then-write inside this single LSU using the same
+    // 4-state FSM plus an internal phase flag (0 = read, 1 = write).
+    // This gives lane-local atomicity (one warp lane cannot interleave
+    // its own R and W); cross-warp atomicity additionally requires the
+    // memory controller to serialise outstanding requests, which it
+    // already does via mem_*_ready handshakes.
+    wire is_atomic = decoded_mem_read_enable && decoded_mem_write_enable;
+    reg  atomic_phase;  // 0 = read in flight, 1 = write in flight
+
     always @(posedge clk) begin
         if (reset) begin
             lsu_state <= IDLE;
@@ -46,9 +56,55 @@ module lsu (
             mem_write_valid <= 0;
             mem_write_address <= 0;
             mem_write_data <= 0;
+            atomic_phase <= 0;
         end else if (enable) begin
-            // If memory read enable is triggered (LDR instruction)
-            if (decoded_mem_read_enable) begin 
+            // Atomic read-modify-write path (ATOMICADD).
+            if (is_atomic) begin
+                unique case (lsu_state)
+                    IDLE: begin
+                        if (core_state == 3'b011) begin
+                            lsu_state    <= REQUESTING;
+                            atomic_phase <= 0;
+                        end
+                    end
+                    REQUESTING: begin
+                        if (atomic_phase == 1'b0) begin
+                            // Issue the read.
+                            mem_read_valid   <= 1;
+                            mem_read_address <= rs;
+                        end else begin
+                            // Issue the modified write: old + rt.
+                            mem_write_valid   <= 1;
+                            mem_write_address <= rs;
+                            mem_write_data    <= lsu_out + rt;
+                        end
+                        lsu_state <= WAITING;
+                    end
+                    WAITING: begin
+                        if (atomic_phase == 1'b0) begin
+                            if (mem_read_ready) begin
+                                mem_read_valid <= 0;
+                                lsu_out        <= mem_read_data;  // Rd <- old
+                                atomic_phase   <= 1;
+                                lsu_state      <= REQUESTING;
+                            end
+                        end else begin
+                            if (mem_write_ready) begin
+                                mem_write_valid <= 0;
+                                lsu_state       <= DONE;
+                            end
+                        end
+                    end
+                    DONE: begin
+                        if (core_state == 3'b110) begin
+                            lsu_state    <= IDLE;
+                            atomic_phase <= 0;
+                        end
+                    end
+                endcase
+            end
+            // Plain LDR.
+            else if (decoded_mem_read_enable) begin
                 // 4-state FSM, fully covered (issue #20).
                 unique case (lsu_state)
                     IDLE: begin
@@ -79,7 +135,7 @@ module lsu (
             end
 
             // If memory write enable is triggered (STR instruction)
-            if (decoded_mem_write_enable) begin 
+            else if (decoded_mem_write_enable) begin 
                 // 4-state FSM, fully covered (issue #20).
                 unique case (lsu_state)
                     IDLE: begin

@@ -41,6 +41,7 @@ module decoder (
         LDR = 4'b0111,
         STR = 4'b1000,
         CONST = 4'b1001,
+        ATOMICADD = 4'b1010,
         RET = 4'b1111;
 
     always @(posedge clk) begin 
@@ -123,6 +124,18 @@ module decoder (
                     CONST: begin 
                         decoded_reg_write_enable <= 1;
                         decoded_reg_input_mux <= 2'b10;
+                    end
+                    ATOMICADD: begin
+                        // Read-modify-write on mem[Rs]; Rd <- old value,
+                        // mem[Rs] <- old + Rt. The LSU recognises both
+                        // mem_*_enable being asserted and runs its
+                        // 5-phase atomic FSM (REQ_R → WAIT_R → REQ_W
+                        // → WAIT_W → DONE) instead of the normal
+                        // single-shot path.
+                        decoded_reg_write_enable <= 1;
+                        decoded_reg_input_mux <= 2'b01;
+                        decoded_mem_read_enable <= 1;
+                        decoded_mem_write_enable <= 1;
                     end
                     RET: begin 
                         decoded_ret <= 1;
