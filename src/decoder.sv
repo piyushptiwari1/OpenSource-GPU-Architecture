@@ -28,6 +28,12 @@ module decoder (
     output reg decoded_alu_output_mux,             // Select operation in ALU
     output reg decoded_pc_mux,                     // Select source of next PC
 
+    // Atomic op selector for the LSU. Only meaningful when both
+    // decoded_mem_read_enable and decoded_mem_write_enable are 1.
+    //   0 = ATOMICADD : mem[Rs] <- mem[Rs] + Rt
+    //   1 = ATOMICCAS : if mem[Rs] == 0 then mem[Rs] <- Rt
+    output reg decoded_atomic_op,
+
     // Return (finished executing thread)
     output reg decoded_ret
 );
@@ -42,6 +48,7 @@ module decoder (
         STR = 4'b1000,
         CONST = 4'b1001,
         ATOMICADD = 4'b1010,
+        ATOMICCAS = 4'b1011,
         RET = 4'b1111;
 
     always @(posedge clk) begin 
@@ -59,6 +66,7 @@ module decoder (
             decoded_alu_arithmetic_mux <= 0;
             decoded_alu_output_mux <= 0;
             decoded_pc_mux <= 0;
+            decoded_atomic_op <= 0;
             decoded_ret <= 0;
         end else begin 
             // Decode when core_state = DECODE
@@ -79,6 +87,7 @@ module decoder (
                 decoded_alu_arithmetic_mux <= 0;
                 decoded_alu_output_mux <= 0;
                 decoded_pc_mux <= 0;
+                decoded_atomic_op <= 0;
                 decoded_ret <= 0;
 
                 // Set the control signals for each instruction
@@ -136,6 +145,17 @@ module decoder (
                         decoded_reg_input_mux <= 2'b01;
                         decoded_mem_read_enable <= 1;
                         decoded_mem_write_enable <= 1;
+                        decoded_atomic_op <= 0;
+                    end
+                    ATOMICCAS: begin
+                        // Test-and-set on mem[Rs]: if old == 0 then
+                        // mem[Rs] <- Rt; Rd <- old. Reuses the LSU's
+                        // atomic FSM via the decoded_atomic_op selector.
+                        decoded_reg_write_enable <= 1;
+                        decoded_reg_input_mux <= 2'b01;
+                        decoded_mem_read_enable <= 1;
+                        decoded_mem_write_enable <= 1;
+                        decoded_atomic_op <= 1;
                     end
                     RET: begin 
                         decoded_ret <= 1;

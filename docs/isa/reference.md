@@ -3,11 +3,11 @@
 !!! info "Generated"
     This page is rendered from [`docs/isa/instructions.yaml`](https://github.com/piyushptiwari1/OpenSource-GPU-Architecture/blob/main/docs/isa/instructions.yaml) by `tools/codegen/render_isa_md.py`. Edit the YAML, not this file.
 
-`SHA-256(instructions.yaml)` = `9e27eb5918cf8cd82ece0fb7d318a65c184af7acd7b5fcecf4acfe71b9c33c8f`
+`SHA-256(instructions.yaml)` = `0faabde85b4068be9d5920acfc14435b83cc59a9d3e57cae5973304dd60f2fe3`
 
 ## Overview
 
-OpenGPU (`opengpu`, ISA version 1) is a **16-bit** instruction-width SIMT machine with an **8-bit** register / data path and an **8-bit** unified address space. It defines 12 instructions across 4 encoding classes (B, I, R, Z).
+OpenGPU (`opengpu`, ISA version 1) is a **16-bit** instruction-width SIMT machine with an **8-bit** register / data path and an **8-bit** unified address space. It defines 13 instructions across 4 encoding classes (B, I, R, Z).
 
 ## Register file
 
@@ -123,6 +123,12 @@ Every instruction emits a fixed bundle of control signals (mirrors `src/decoder.
 
 - **Syntax:** `ATOMICADD Rd, Rs, Rt`
 - **Semantics:** old = mem[Rs]; mem[Rs] <- (old + Rt) & 0xFF; Rd <- old
+- **Control:** `alu_arithmetic_mux=0`, `alu_output_mux=0`, `mem_read_enable=1`, `mem_write_enable=1`, `nzp_write_enable=0`, `pc_mux=0`, `reg_input_mux=1`, `reg_write_enable=1`, `ret=0`
+
+### `ATOMICCAS` — opcode `0xB` (R-type)
+
+- **Syntax:** `ATOMICCAS Rd, Rs, Rt`
+- **Semantics:** old = mem[Rs]; if old == 0 then mem[Rs] <- Rt; Rd <- old
 - **Control:** `alu_arithmetic_mux=0`, `alu_output_mux=0`, `mem_read_enable=1`, `mem_write_enable=1`, `nzp_write_enable=0`, `pc_mux=0`, `reg_input_mux=1`, `reg_write_enable=1`, `ret=0`
 
 ### `RET` — opcode `0xF` (Z-type)

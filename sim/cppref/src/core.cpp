@@ -133,6 +133,25 @@ void Core::step_thread(std::size_t tid, TraceSink* trace) {
             rec.mem_w  = std::make_pair(static_cast<std::uint8_t>(addr), upd);
             break;
         }
+        case isa::Opcode::ATOMICCAS: {
+            // Test-and-set: Rd gets the old value of mem[Rs]; if the
+            // old value was zero, mem[Rs] is replaced with Rt. The
+            // 'expected' value is implicitly zero so the encoding fits
+            // R-type's three-operand form. Refsim atomicity is
+            // trivial (single-threaded); RTL relies on the data
+            // memory controller's per-address lock.
+            const std::uint16_t addr = th.regs[decoded.rs];
+            const std::uint8_t  rt   = th.regs[decoded.rt];
+            const std::uint8_t  old  = memory_.load(addr);
+            th.regs[decoded.rd] = old;
+            rec.rd     = decoded.rd;
+            rec.rd_val = old;
+            if (old == 0) {
+                memory_.store(addr, rt);
+                rec.mem_w = std::make_pair(static_cast<std::uint8_t>(addr), rt);
+            }
+            break;
+        }
         case isa::Opcode::CONST: {
             th.regs[decoded.rd] = decoded.imm8;
             rec.rd     = decoded.rd;

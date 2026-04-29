@@ -76,3 +76,23 @@ TEST_CASE("ATOMICADD accumulates 8 lanes into a single counter", "[kernel]") {
 
     REQUIRE(mem.raw()[64] == 8);
 }
+
+TEST_CASE("ATOMICCAS only the first lane wins the test-and-set", "[kernel]") {
+    // Each lane attempts CAS(mem[64], expected=0, new=1). Refsim is
+    // single-threaded, so the lanes execute in lane order; only lane 0
+    // observes old==0 (Rd=0) and writes 1; subsequent lanes observe
+    // old==1 and leave memory unchanged. We pin the architectural
+    // contract: final mem[64]==1, exactly one lane reads 0.
+    std::vector<std::uint16_t> prog = {
+        C(1, 64),                  // R1 <- 64  (lock address)
+        C(2, 1),                   // R2 <- 1   (token to install)
+        I(0xB, 3, 1, 2),           // R3 <- atomic_cas(mem[R1], 0, R2)
+        0xF000,                    // RET
+    };
+
+    Memory mem(128);
+    Core core({.block_idx = 0, .block_dim = 8, .max_steps = 1000U}, prog, mem);
+    core.run(nullptr);
+
+    REQUIRE(mem.raw()[64] == 1);
+}

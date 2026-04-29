@@ -55,9 +55,9 @@ TEST_CASE("RET sets ret control bit", "[decode]") {
 }
 
 TEST_CASE("unknown opcode is benign", "[decode]") {
-    // 0xB is currently unassigned (0xA is now ATOMICADD).
-    auto d = decode(0xB000);
-    REQUIRE(opengpu::isa::lookup(0xB) == nullptr);
+    // 0xC is currently unassigned (0xA = ATOMICADD, 0xB = ATOMICCAS).
+    auto d = decode(0xC000);
+    REQUIRE(opengpu::isa::lookup(0xC) == nullptr);
     REQUIRE(d.reg_write_enable == 0);
 }
 
@@ -68,6 +68,18 @@ TEST_CASE("ATOMICADD decodes as R-type with read+write", "[decode]") {
     REQUIRE(d.rd == 3);
     REQUIRE(d.rs == 4);
     REQUIRE(d.rt == 5);
+    REQUIRE(d.reg_write_enable == 1);
+    REQUIRE(d.mem_read_enable  == 1);
+    REQUIRE(d.mem_write_enable == 1);
+}
+
+TEST_CASE("ATOMICCAS decodes as R-type with read+write", "[decode]") {
+    // ATOMICCAS R6, R7, R8  =>  0xB @ 6 @ 7 @ 8
+    auto d = decode(0xB678);
+    REQUIRE(d.op == Opcode::ATOMICCAS);
+    REQUIRE(d.rd == 6);
+    REQUIRE(d.rs == 7);
+    REQUIRE(d.rt == 8);
     REQUIRE(d.reg_write_enable == 1);
     REQUIRE(d.mem_read_enable  == 1);
     REQUIRE(d.mem_write_enable == 1);

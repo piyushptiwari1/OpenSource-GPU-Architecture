@@ -16,6 +16,9 @@ module lsu (
     // Memory Control Sgiansl
     input decoded_mem_read_enable,
     input decoded_mem_write_enable,
+    // 0 = ATOMICADD (mem[Rs] <- old + Rt)
+    // 1 = ATOMICCAS (if old == 0 then mem[Rs] <- Rt)
+    input decoded_atomic_op,
 
     // Registers
     input [7:0] rs,
@@ -83,10 +86,19 @@ module lsu (
                             mem_read_valid   <= 1;
                             mem_read_address <= rs;
                         end else begin
-                            // Issue the modified write: old + rt.
+                            // Issue the modified write.
+                            // ATOMICADD: mem[Rs] <- old + Rt
+                            // ATOMICCAS: if old == 0 then mem[Rs] <- Rt;
+                            //            otherwise rewrite the old value
+                            //            so the controller's lock-and-write
+                            //            phase still completes cleanly.
                             mem_write_valid   <= 1;
                             mem_write_address <= rs;
-                            mem_write_data    <= lsu_out + rt;
+                            if (decoded_atomic_op == 1'b0) begin
+                                mem_write_data <= lsu_out + rt;
+                            end else begin
+                                mem_write_data <= (lsu_out == 8'b0) ? rt : lsu_out;
+                            end
                         end
                         lsu_state <= WAITING;
                     end

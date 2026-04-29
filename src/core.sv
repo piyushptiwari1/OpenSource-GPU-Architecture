@@ -85,6 +85,7 @@ module core #(
     reg [1:0] decoded_alu_arithmetic_mux;   // Select arithmetic operation
     reg decoded_alu_output_mux;             // Select operation in ALU
     reg decoded_pc_mux;                     // Select source of next PC
+    reg decoded_atomic_op;                  // 0=ATOMICADD, 1=ATOMICCAS
     reg decoded_ret;
 
     // Fetcher
@@ -123,6 +124,7 @@ module core #(
         .decoded_alu_arithmetic_mux(decoded_alu_arithmetic_mux),
         .decoded_alu_output_mux(decoded_alu_output_mux),
         .decoded_pc_mux(decoded_pc_mux),
+        .decoded_atomic_op(decoded_atomic_op),
         .decoded_ret(decoded_ret)
     );
 
@@ -173,6 +175,7 @@ module core #(
                 .core_state(core_state),
                 .decoded_mem_read_enable(decoded_mem_read_enable),
                 .decoded_mem_write_enable(decoded_mem_write_enable),
+                .decoded_atomic_op(decoded_atomic_op),
                 .mem_read_valid(data_mem_read_valid[i]),
                 .mem_read_address(data_mem_read_address[i]),
                 .mem_read_ready(data_mem_read_ready[i]),
