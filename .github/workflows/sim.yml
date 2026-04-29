@@ -141,7 +141,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [matadd, matmul]
+        test: [matadd, matmul, atomic_add]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
