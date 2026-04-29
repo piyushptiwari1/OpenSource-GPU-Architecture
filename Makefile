@@ -19,6 +19,7 @@ test_%:
 	cd ..
 	LD_LIBRARY_PATH="$(LIBPYTHON_DIR):$$LD_LIBRARY_PATH" \
 	COCOTB_TEST_MODULES=$(if $(MODULE),$(MODULE),test.test_$*) \
+	MODULE=$(if $(MODULE),$(MODULE),test.test_$*) \
 	vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/sim.vvp -fst > test/runs/test_$*_$(TIMESTAMP).out
 
 # Path to sv2v: prefer vendored binary if present (for users without OSS
@@ -26,10 +27,31 @@ test_%:
 # the toolchain container ships sv2v in /opt/oss-cad-suite/bin).
 SV2V ?= $(if $(wildcard ./sv2v/sv2v),./sv2v/sv2v,sv2v)
 
+# Sources required to elaborate the `gpu` top. Tracing the instance
+# hierarchy: gpu -> {dcr, controller, dispatch, core}; core -> {fetcher,
+# decoder, scheduler, alu, lsu, registers, pc}. Anything else under
+# src/ (display_controller, framebuffer, geometry_engine, …) is part of
+# the wider SoC project and is built independently via
+# `Makefile.vlsi`. Pulling it into the gpu-top sv2v glob breaks
+# compilation because v0.0.13 cannot translate the packed-array port
+# patterns those files use.
+GPU_TOP_SRCS := \
+    src/gpu.sv         \
+    src/dcr.sv         \
+    src/controller.sv  \
+    src/dispatch.sv    \
+    src/core.sv        \
+    src/fetcher.sv     \
+    src/decoder.sv     \
+    src/scheduler.sv   \
+    src/lsu.sv         \
+    src/registers.sv   \
+    src/pc.sv
+
 compile:
 	mkdir -p build
 	make compile_alu
-	$(SV2V) -I src -w build/gpu.v $(wildcard src/*.sv)
+	$(SV2V) -I src -w build/gpu.v $(GPU_TOP_SRCS)
 	echo "" >> build/gpu.v
 	cat build/alu.v >> build/gpu.v
 	echo '`timescale 1ns/1ns' > build/temp.v
