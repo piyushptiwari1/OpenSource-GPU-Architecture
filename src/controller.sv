@@ -25,6 +25,12 @@ module controller #(
     input [DATA_BITS-1:0] consumer_write_data [NUM_CONSUMERS-1:0],
     output reg [NUM_CONSUMERS-1:0] consumer_write_ready,
 
+    // Atomicity: each consumer asserts consumer_atomic for the entire
+    // duration of an atomic read-modify-write. The controller locks the
+    // target address against other consumers from the moment it accepts
+    // the read until it completes the matching write.
+    input [NUM_CONSUMERS-1:0] consumer_atomic,
+
     // Memory Interface (Data / Program)
     output reg [NUM_CHANNELS-1:0] mem_read_valid,
     output reg [ADDR_BITS-1:0] mem_read_address [NUM_CHANNELS-1:0],
@@ -39,12 +45,18 @@ module controller #(
         READ_WAITING = 3'b010, 
         WRITE_WAITING = 3'b011,
         READ_RELAYING = 3'b100,
-        WRITE_RELAYING = 3'b101;
+        WRITE_RELAYING = 3'b101,
+        ATOMIC_HOLD    = 3'b110; // After atomic read-relay, waits for owner's write
 
     // Keep track of state for each channel and which jobs each channel is handling
     reg [2:0] controller_state [NUM_CHANNELS-1:0];
     reg [$clog2(NUM_CONSUMERS)-1:0] current_consumer [NUM_CHANNELS-1:0]; // Which consumer is each channel currently serving
     reg [NUM_CONSUMERS-1:0] channel_serving_consumer; // Which channels are being served? Prevents many workers from picking up the same request.
+
+    // Per-channel atomic address lock. While `atomic_lock_valid[c]` is set,
+    // no other channel may issue a read or write to `atomic_lock_addr[c]`.
+    reg [NUM_CHANNELS-1:0]   atomic_lock_valid;
+    reg [ADDR_BITS-1:0]      atomic_lock_addr [NUM_CHANNELS-1:0];
 
     always @(posedge clk) begin
         if (reset) begin 
@@ -63,7 +75,9 @@ module controller #(
                 mem_write_data[k] <= {DATA_BITS{1'b0}};
                 current_consumer[k] <= 0;
                 controller_state[k] <= IDLE;
+                atomic_lock_addr[k] <= {ADDR_BITS{1'b0}};
             end
+            atomic_lock_valid <= {NUM_CHANNELS{1'b0}};
             for (int k = 0; k < NUM_CONSUMERS; k = k + 1) begin
                 consumer_read_data[k] <= {DATA_BITS{1'b0}};
             end
@@ -72,7 +86,15 @@ module controller #(
         end else begin 
             // Local variable to handle arbitration updates within the same cycle
             reg [NUM_CONSUMERS-1:0] next_channel_serving_consumer;
+            // Tentative atomic locks acquired this cycle so multiple channels
+            // arbitrating concurrently observe each other's pending locks.
+            reg [NUM_CHANNELS-1:0]  next_atomic_lock_valid;
+            reg [ADDR_BITS-1:0]     next_atomic_lock_addr [NUM_CHANNELS-1:0];
             next_channel_serving_consumer = channel_serving_consumer;
+            next_atomic_lock_valid = atomic_lock_valid;
+            for (int k = 0; k < NUM_CHANNELS; k = k + 1) begin
+                next_atomic_lock_addr[k] = atomic_lock_addr[k];
+            end
 
             // For each channel, we handle processing concurrently
             for (int i = 0; i < NUM_CHANNELS; i = i + 1) begin 
@@ -83,7 +105,18 @@ module controller #(
                     IDLE: begin
                         // While this channel is idle, cycle through consumers looking for one with a pending request
                         for (int j = 0; j < NUM_CONSUMERS; j = j + 1) begin 
-                            if (consumer_read_valid[j] && !next_channel_serving_consumer[j]) begin 
+                            if (consumer_read_valid[j] && !next_channel_serving_consumer[j]) begin
+                                // Honor active atomic locks on this address held by other channels.
+                                logic addr_locked_r;
+                                addr_locked_r = 1'b0;
+                                for (int c = 0; c < NUM_CHANNELS; c = c + 1) begin
+                                    if (c != i && next_atomic_lock_valid[c]
+                                        && next_atomic_lock_addr[c] == consumer_read_address[j]) begin
+                                        addr_locked_r = 1'b1;
+                                    end
+                                end
+                                if (addr_locked_r) continue;
+
                                 next_channel_serving_consumer[j] = 1;
                                 current_consumer[i] <= j;
 
@@ -91,9 +124,26 @@ module controller #(
                                 mem_read_address[i] <= consumer_read_address[j];
                                 controller_state[i] <= READ_WAITING;
 
+                                // Acquire atomic lock for the entire RMW window (visible same-cycle).
+                                if (consumer_atomic[j]) begin
+                                    next_atomic_lock_valid[i] = 1'b1;
+                                    next_atomic_lock_addr[i]  = consumer_read_address[j];
+                                end
+
                                 // Once we find a pending request, pick it up with this channel and stop looking for requests
                                 break;
-                            end else if (consumer_write_valid[j] && !next_channel_serving_consumer[j]) begin 
+                            end else if (consumer_write_valid[j] && !next_channel_serving_consumer[j]) begin
+                                // Plain (non-atomic) writes also respect existing atomic locks.
+                                logic addr_locked_w;
+                                addr_locked_w = 1'b0;
+                                for (int c = 0; c < NUM_CHANNELS; c = c + 1) begin
+                                    if (c != i && next_atomic_lock_valid[c]
+                                        && next_atomic_lock_addr[c] == consumer_write_address[j]) begin
+                                        addr_locked_w = 1'b1;
+                                    end
+                                end
+                                if (addr_locked_w) continue;
+
                                 next_channel_serving_consumer[j] = 1;
                                 current_consumer[i] <= j;
 
@@ -127,15 +177,37 @@ module controller #(
                     // Wait until consumer acknowledges it received response, then reset
                     READ_RELAYING: begin
                         if (!consumer_read_valid[current_consumer[i]]) begin 
-                            next_channel_serving_consumer[current_consumer[i]] = 0;
                             consumer_read_ready[current_consumer[i]] <= 0;
-                            controller_state[i] <= IDLE;
+                            // For atomic consumers, keep the channel-consumer
+                            // binding (and the address lock) and wait for the
+                            // owner's matching write to come in.
+                            if (consumer_atomic[current_consumer[i]]) begin
+                                controller_state[i] <= ATOMIC_HOLD;
+                            end else begin
+                                next_channel_serving_consumer[current_consumer[i]] = 0;
+                                controller_state[i] <= IDLE;
+                            end
+                        end
+                    end
+                    ATOMIC_HOLD: begin
+                        // Same channel waits for the owning consumer to issue
+                        // its write (the W half of the RMW). The address lock
+                        // remains in effect throughout.
+                        if (consumer_write_valid[current_consumer[i]]) begin
+                            mem_write_valid[i] <= 1;
+                            mem_write_address[i] <= consumer_write_address[current_consumer[i]];
+                            mem_write_data[i] <= consumer_write_data[current_consumer[i]];
+                            controller_state[i] <= WRITE_WAITING;
                         end
                     end
                     WRITE_RELAYING: begin 
                         if (!consumer_write_valid[current_consumer[i]]) begin 
                             next_channel_serving_consumer[current_consumer[i]] = 0;
                             consumer_write_ready[current_consumer[i]] <= 0;
+                            // Release atomic lock if this channel was holding one.
+                            if (next_atomic_lock_valid[i]) begin
+                                next_atomic_lock_valid[i] = 1'b0;
+                            end
                             controller_state[i] <= IDLE;
                         end
                     end
@@ -145,6 +217,10 @@ module controller #(
             
             // Update the state register
             channel_serving_consumer <= next_channel_serving_consumer;
+            atomic_lock_valid <= next_atomic_lock_valid;
+            for (int k = 0; k < NUM_CHANNELS; k = k + 1) begin
+                atomic_lock_addr[k] <= next_atomic_lock_addr[k];
+            end
         end
     end
 endmodule

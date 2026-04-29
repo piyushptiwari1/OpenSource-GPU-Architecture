@@ -50,7 +50,9 @@ module core #(
     output reg [THREADS_PER_BLOCK-1:0] data_mem_write_valid,
     output reg [DATA_MEM_ADDR_BITS-1:0] data_mem_write_address [THREADS_PER_BLOCK-1:0],
     output reg [DATA_MEM_DATA_BITS-1:0] data_mem_write_data [THREADS_PER_BLOCK-1:0],
-    input [THREADS_PER_BLOCK-1:0] data_mem_write_ready
+    input [THREADS_PER_BLOCK-1:0] data_mem_write_ready,
+    // Per-lane atomic flag forwarded from each LSU to the data memory controller.
+    output wire [THREADS_PER_BLOCK-1:0] data_mem_atomic
 );
     // State
     // These signals are shared across the entire core: every active lane sees them.
@@ -179,6 +181,7 @@ module core #(
                 .mem_write_address(data_mem_write_address[i]),
                 .mem_write_data(data_mem_write_data[i]),
                 .mem_write_ready(data_mem_write_ready[i]),
+                .consumer_atomic(data_mem_atomic[i]),
                 .rs(rs[i]),
                 .rt(rt[i]),
                 .lsu_state(lsu_state[i]),

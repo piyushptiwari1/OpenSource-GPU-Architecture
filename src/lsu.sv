@@ -33,7 +33,11 @@ module lsu (
 
     // LSU Outputs
     output reg [1:0] lsu_state,
-    output reg [7:0] lsu_out
+    output reg [7:0] lsu_out,
+
+    // Atomic indication to memory controller (held high through RMW so that
+    // the controller can lock the target address against other consumers).
+    output wire consumer_atomic
 );
     localparam IDLE = 2'b00, REQUESTING = 2'b01, WAITING = 2'b10, DONE = 2'b11;
 
@@ -46,6 +50,12 @@ module lsu (
     // already does via mem_*_ready handshakes.
     wire is_atomic = decoded_mem_read_enable && decoded_mem_write_enable;
     reg  atomic_phase;  // 0 = read in flight, 1 = write in flight
+
+    // Hold the atomic flag from the moment the LSU leaves IDLE until the
+    // owning core completes the UPDATE phase (which transitions us back to
+    // IDLE). This guarantees the controller's per-address lock spans the
+    // full RMW window across all participating channels.
+    assign consumer_atomic = is_atomic && (lsu_state != IDLE);
 
     always @(posedge clk) begin
         if (reset) begin

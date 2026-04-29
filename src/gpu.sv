@@ -64,6 +64,7 @@ module gpu #(
     reg [DATA_MEM_ADDR_BITS-1:0] lsu_write_address [NUM_LSUS-1:0];
     reg [DATA_MEM_DATA_BITS-1:0] lsu_write_data [NUM_LSUS-1:0];
     reg [NUM_LSUS-1:0] lsu_write_ready;
+    wire [NUM_LSUS-1:0] lsu_atomic;
 
     // Fetcher <> Program Memory Controller Channels
     localparam NUM_FETCHERS = NUM_CORES;
@@ -105,6 +106,7 @@ module gpu #(
         .consumer_write_address(lsu_write_address),
         .consumer_write_data(lsu_write_data),
         .consumer_write_ready(lsu_write_ready),
+        .consumer_atomic(lsu_atomic),
 
         .mem_read_valid(data_mem_read_valid),
         .mem_read_address(data_mem_read_address),
@@ -169,6 +171,7 @@ module gpu #(
             wire [DATA_MEM_ADDR_BITS-1:0] core_lsu_write_address [THREADS_PER_BLOCK-1:0];
             wire [DATA_MEM_DATA_BITS-1:0] core_lsu_write_data [THREADS_PER_BLOCK-1:0];
             reg [THREADS_PER_BLOCK-1:0] core_lsu_write_ready;
+            wire [THREADS_PER_BLOCK-1:0] core_lsu_atomic;
 
             // Pass through signals between LSUs and data memory controller
             genvar j;
@@ -186,6 +189,10 @@ module gpu #(
                     core_lsu_read_data[j] <= lsu_read_data[lsu_index];
                     core_lsu_write_ready[j] <= lsu_write_ready[lsu_index];
                 end
+                // Atomic flag is combinational from LSU; forward without a
+                // pipeline stage so the controller sees it in the same cycle
+                // it samples consumer_read_valid.
+                assign lsu_atomic[lsu_index] = core_lsu_atomic[j];
             end
 
             // Compute Core
@@ -215,7 +222,8 @@ module gpu #(
                 .data_mem_write_valid(core_lsu_write_valid),
                 .data_mem_write_address(core_lsu_write_address),
                 .data_mem_write_data(core_lsu_write_data),
-                .data_mem_write_ready(core_lsu_write_ready)
+                .data_mem_write_ready(core_lsu_write_ready),
+                .data_mem_atomic(core_lsu_atomic)
             );
         end
     endgenerate
