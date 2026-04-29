@@ -246,6 +246,31 @@ instructions:
       pc_mux: 0
       ret: 0
 
+  # Atomic read-modify-write on global memory. The thread reads
+  # mem[Rs] into Rd, then writes (old + Rt) back to mem[Rs] in a
+  # single uninterruptible step. Required for warp-level reductions
+  # and histograms.
+  #
+  # Phase 1 (this commit): refsim + assembler grammar only. The RTL
+  # decoder leaves opcode 0xA decoded as a no-op until the matching
+  # LSU + decoder changes land in a follow-up commit. Kernels that
+  # need atomic semantics on real RTL should not use this opcode yet.
+  - mnemonic: ATOMICADD
+    opcode: 0xA
+    type: R
+    syntax: "ATOMICADD Rd, Rs, Rt"
+    semantics: "old = mem[Rs]; mem[Rs] <- (old + Rt) & 0xFF; Rd <- old"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 1
+      mem_write_enable: 1
+      nzp_write_enable: 0
+      reg_input_mux: 1
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
   - mnemonic: RET
     opcode: 0xF
     type: Z
