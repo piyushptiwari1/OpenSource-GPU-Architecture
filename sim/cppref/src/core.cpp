@@ -116,6 +116,23 @@ void Core::step_thread(std::size_t tid, TraceSink* trace) {
             rec.mem_w = std::make_pair(static_cast<std::uint8_t>(addr), v);
             break;
         }
+        case isa::Opcode::ATOMICADD: {
+            // Read-modify-write on mem[Rs]: Rd gets the *old* value,
+            // memory gets old + Rt (8-bit modular). Refsim is
+            // single-threaded so the operation is trivially atomic;
+            // the RTL implementation will need a real LSU FSM to give
+            // the same observable ordering across warps.
+            const std::uint16_t addr = th.regs[decoded.rs];
+            const std::uint8_t  rt   = th.regs[decoded.rt];
+            const std::uint8_t  old  = memory_.load(addr);
+            const std::uint8_t  upd  = static_cast<std::uint8_t>(old + rt);
+            memory_.store(addr, upd);
+            th.regs[decoded.rd] = old;
+            rec.rd     = decoded.rd;
+            rec.rd_val = old;
+            rec.mem_w  = std::make_pair(static_cast<std::uint8_t>(addr), upd);
+            break;
+        }
         case isa::Opcode::CONST: {
             th.regs[decoded.rd] = decoded.imm8;
             rec.rd     = decoded.rd;

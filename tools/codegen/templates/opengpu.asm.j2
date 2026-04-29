@@ -23,7 +23,7 @@
 {%- for ins in isa.instructions %}
     {%- if ins.type == 'R' and ins.mnemonic == 'CMP' %}
     CMP {rs: reg}, {rt: reg} => 0x{{ '%X' | format(ins.opcode) }}`4 @ 0`4 @ rs @ rt
-    {%- elif ins.type == 'R' and ins.mnemonic in ['ADD','SUB','MUL','DIV'] %}
+    {%- elif ins.type == 'R' and ins.mnemonic in ['ADD','SUB','MUL','DIV','ATOMICADD'] %}
     {{ ins.mnemonic }} {rd: reg}, {rs: reg}, {rt: reg} => 0x{{ '%X' | format(ins.opcode) }}`4 @ rd @ rs @ rt
     {%- elif ins.type == 'R' and ins.mnemonic == 'LDR' %}
     LDR {rd: reg}, {rs: reg} => 0x{{ '%X' | format(ins.opcode) }}`4 @ rd @ rs @ 0`4

@@ -57,3 +57,22 @@ TEST_CASE("matadd-8 reproduces cocotb golden", "[kernel]") {
                 static_cast<std::uint8_t>((i + 1) * 2));
     }
 }
+
+TEST_CASE("ATOMICADD accumulates 8 lanes into a single counter", "[kernel]") {
+    // Each lane atomically adds 1 to mem[64]. Final value must be 8.
+    // Refsim is single-threaded so atomicity is trivial; this test
+    // pins the *architectural* contract (Rd = old, mem[Rs] = old+Rt)
+    // ahead of the RTL implementation in part B.
+    std::vector<std::uint16_t> prog = {
+        C(1, 64),                  // R1 <- 64  (counter address)
+        C(2, 1),                   // R2 <- 1   (increment)
+        I(0xA, 3, 1, 2),           // R3 <- atomic_add(mem[R1], R2)
+        0xF000,                    // RET
+    };
+
+    Memory mem(128);
+    Core core({.block_idx = 0, .block_dim = 8, .max_steps = 1000U}, prog, mem);
+    core.run(nullptr);
+
+    REQUIRE(mem.raw()[64] == 8);
+}
