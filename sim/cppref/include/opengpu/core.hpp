@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -38,6 +39,13 @@ private:
     std::span<const std::uint16_t>   program_;
     Memory&                          memory_;
     std::vector<ThreadState>         threads_;
+
+    // Per-block shared (on-chip) memory targeted by LDS/STS. Block-private and
+    // shared across the threads of this Core. The refsim runs threads to
+    // completion sequentially, so cross-thread shared-memory ordering does not
+    // match lockstep RTL (same caveat as BAR); single-thread LDS/STS roundtrips
+    // and block-wide exchange after all threads finish are modelled faithfully.
+    std::array<std::uint8_t, 256>    shared_{};
 };
 
 }  // namespace opengpu::ref

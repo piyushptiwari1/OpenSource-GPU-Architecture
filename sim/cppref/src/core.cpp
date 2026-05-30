@@ -116,6 +116,23 @@ void Core::step_thread(std::size_t tid, TraceSink* trace) {
             rec.mem_w = std::make_pair(static_cast<std::uint8_t>(addr), v);
             break;
         }
+        case isa::Opcode::LDS: {
+            // Load from per-block shared memory: Rd <- shmem[Rs].
+            const std::uint8_t addr = th.regs[decoded.rs];
+            const std::uint8_t v    = shared_[addr];
+            th.regs[decoded.rd] = v;
+            rec.rd     = decoded.rd;
+            rec.rd_val = v;
+            break;
+        }
+        case isa::Opcode::STS: {
+            // Store to per-block shared memory: shmem[Rs] <- Rt.
+            const std::uint8_t addr = th.regs[decoded.rs];
+            const std::uint8_t v    = th.regs[decoded.rt];
+            shared_[addr] = v;
+            rec.mem_w = std::make_pair(addr, v);
+            break;
+        }
         case isa::Opcode::ATOMICADD: {
             // Read-modify-write on mem[Rs]: Rd gets the *old* value,
             // memory gets old + Rt (8-bit modular). Refsim is
@@ -163,6 +180,13 @@ void Core::step_thread(std::size_t tid, TraceSink* trace) {
                 next_pc      = static_cast<std::uint16_t>(decoded.imm9 & 0xFF);
                 branch_taken = true;
             }
+            break;
+        }
+        case isa::Opcode::BAR: {
+            // Block-wide barrier. The reference model executes one thread at a
+            // time to completion, so there is nothing to synchronise here; BAR
+            // is a no-op that simply falls through to PC+1. The RTL scheduler
+            // is what enforces the cross-lane wait/release semantics.
             break;
         }
         case isa::Opcode::RET: {

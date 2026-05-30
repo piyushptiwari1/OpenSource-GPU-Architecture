@@ -54,11 +54,42 @@ TEST_CASE("RET sets ret control bit", "[decode]") {
     REQUIRE(d.ret == 1);
 }
 
-TEST_CASE("unknown opcode is benign", "[decode]") {
-    // 0xC is currently unassigned (0xA = ATOMICADD, 0xB = ATOMICCAS).
+TEST_CASE("BAR decodes as barrier with no register write", "[decode]") {
     auto d = decode(0xC000);
-    REQUIRE(opengpu::isa::lookup(0xC) == nullptr);
+    REQUIRE(d.op == Opcode::BAR);
     REQUIRE(d.reg_write_enable == 0);
+    REQUIRE(d.mem_read_enable  == 0);
+    REQUIRE(d.mem_write_enable == 0);
+}
+
+TEST_CASE("LDS decodes as shared load with read+regwrite", "[decode]") {
+    // LDS R3, R4  =>  0xD @ 3 @ 4 @ 0
+    auto d = decode(0xD340);
+    REQUIRE(d.op == Opcode::LDS);
+    REQUIRE(d.rd == 3);
+    REQUIRE(d.rs == 4);
+    REQUIRE(d.reg_write_enable == 1);
+    REQUIRE(d.mem_read_enable  == 1);
+    REQUIRE(d.mem_write_enable == 0);
+}
+
+TEST_CASE("STS decodes as shared store with write only", "[decode]") {
+    // STS R5, R6  =>  0xE @ 0 @ 5 @ 6
+    auto d = decode(0xE056);
+    REQUIRE(d.op == Opcode::STS);
+    REQUIRE(d.rs == 5);
+    REQUIRE(d.rt == 6);
+    REQUIRE(d.reg_write_enable == 0);
+    REQUIRE(d.mem_read_enable  == 0);
+    REQUIRE(d.mem_write_enable == 1);
+}
+
+TEST_CASE("opcode space is fully assigned", "[decode]") {
+    // The 4-bit opcode field is now fully populated (0x0..0xF). Every encoding
+    // must resolve to a defined instruction spec.
+    for (int op = 0; op <= 0xF; ++op) {
+        REQUIRE(opengpu::isa::lookup(static_cast<std::uint8_t>(op)) != nullptr);
+    }
 }
 
 TEST_CASE("ATOMICADD decodes as R-type with read+write", "[decode]") {

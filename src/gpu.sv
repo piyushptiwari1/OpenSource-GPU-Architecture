@@ -42,7 +42,17 @@ module gpu #(
     output wire [DATA_MEM_NUM_CHANNELS-1:0] data_mem_write_valid,
     output wire [DATA_MEM_ADDR_BITS-1:0] data_mem_write_address [DATA_MEM_NUM_CHANNELS-1:0],
     output wire [DATA_MEM_DATA_BITS-1:0] data_mem_write_data [DATA_MEM_NUM_CHANNELS-1:0],
-    input wire [DATA_MEM_NUM_CHANNELS-1:0] data_mem_write_ready
+    input wire [DATA_MEM_NUM_CHANNELS-1:0] data_mem_write_ready,
+
+    // Performance counters, aggregated (summed) across all cores. Exposed at the
+    // top level so a testbench can observe SIMT execution behaviour.
+    output reg [31:0] perf_cycle_count,
+    output reg [31:0] perf_instr_count,
+    output reg [31:0] perf_divergence_count,
+    output reg [31:0] perf_barrier_count,
+    // Total memory read requests eliminated by warp-level coalescing (summed
+    // across all cores). A value of 0 means no two lanes shared a load address.
+    output reg [31:0] perf_coalesced_count
 );
     // Control
     wire [7:0] thread_count;
@@ -72,6 +82,14 @@ module gpu #(
     reg [PROGRAM_MEM_ADDR_BITS-1:0] fetcher_read_address [NUM_FETCHERS-1:0];
     reg [NUM_FETCHERS-1:0] fetcher_read_ready;
     reg [PROGRAM_MEM_DATA_BITS-1:0] fetcher_read_data [NUM_FETCHERS-1:0];
+
+    // Per-core performance counters (aggregated below into the top-level ports).
+    wire [31:0] core_perf_cycle_count [NUM_CORES-1:0];
+    wire [31:0] core_perf_instr_count [NUM_CORES-1:0];
+    wire [31:0] core_perf_divergence_count [NUM_CORES-1:0];
+    wire [31:0] core_perf_barrier_count [NUM_CORES-1:0];
+    // Per-core count of memory read requests eliminated by warp coalescing.
+    wire [31:0] core_coalesced_total [NUM_CORES-1:0];
     
     initial begin
         $dumpfile("gpu.vcd");
@@ -173,20 +191,67 @@ module gpu #(
             reg [THREADS_PER_BLOCK-1:0] core_lsu_write_ready;
             wire [THREADS_PER_BLOCK-1:0] core_lsu_atomic;
 
+            // ---- Warp-level same-address read coalescing -------------------
+            // When several lanes in this core issue a LOAD to the *identical*
+            // address in the same cycle, only the lowest-index lane (the
+            // "leader") actually forwards a read request to the memory
+            // controller; the other lanes ("followers") are served from the
+            // leader's result. This is correct for the single-word memory model
+            // here (same address -> same data) and collapses N identical loads
+            // into one memory transaction. Lanes with distinct addresses (e.g.
+            // matadd/matmul) form singleton groups and behave exactly as before.
+            // Atomic accesses NEVER coalesce (each keeps its own locked RMW).
+            reg  [THREADS_PER_BLOCK-1:0] read_is_leader;
+            // For each lane, the index of the leader serving its address.
+            reg  [$clog2(THREADS_PER_BLOCK):0] read_leader_idx [THREADS_PER_BLOCK-1:0];
+            integer cl_a, cl_b;
+            always @(*) begin
+                for (cl_a = 0; cl_a < THREADS_PER_BLOCK; cl_a = cl_a + 1) begin
+                    // Default: a lane leads itself (also the case for atomics
+                    // and for lanes not issuing a read).
+                    read_is_leader[cl_a] = core_lsu_read_valid[cl_a];
+                    read_leader_idx[cl_a] = cl_a[$clog2(THREADS_PER_BLOCK):0];
+                    if (core_lsu_read_valid[cl_a] && !core_lsu_atomic[cl_a]) begin
+                        // Walk every lane; the lowest-index non-atomic lane with
+                        // the same address wins as leader (iterate downward so the
+                        // final write keeps the smallest matching index).
+                        for (cl_b = THREADS_PER_BLOCK - 1; cl_b >= 0; cl_b = cl_b - 1) begin
+                            if (core_lsu_read_valid[cl_b] && !core_lsu_atomic[cl_b]
+                                && core_lsu_read_address[cl_b] == core_lsu_read_address[cl_a]) begin
+                                read_leader_idx[cl_a] = cl_b[$clog2(THREADS_PER_BLOCK):0];
+                            end
+                        end
+                        // This lane is a leader only if it is its own leader.
+                        if (read_leader_idx[cl_a] != cl_a[$clog2(THREADS_PER_BLOCK):0]) begin
+                            read_is_leader[cl_a] = 1'b0;
+                        end
+                    end
+                end
+            end
+
+            // Count of follower read requests eliminated by coalescing in this
+            // core, accumulated over the whole run (cleared only on full reset).
+            reg [31:0] core_coalesced_count;
+            reg [THREADS_PER_BLOCK-1:0] prev_read_valid;
+
             // Pass through signals between LSUs and data memory controller
             genvar j;
             for (j = 0; j < THREADS_PER_BLOCK; j = j + 1) begin
                 localparam lsu_index = i * THREADS_PER_BLOCK + j;
                 always @(posedge clk) begin 
-                    lsu_read_valid[lsu_index] <= core_lsu_read_valid[j];
+                    // Followers do NOT drive a request to the controller; only
+                    // the leader's read is forwarded (atomics always lead).
+                    lsu_read_valid[lsu_index] <= core_lsu_read_valid[j] && read_is_leader[j];
                     lsu_read_address[lsu_index] <= core_lsu_read_address[j];
 
                     lsu_write_valid[lsu_index] <= core_lsu_write_valid[j];
                     lsu_write_address[lsu_index] <= core_lsu_write_address[j];
                     lsu_write_data[lsu_index] <= core_lsu_write_data[j];
-                    
-                    core_lsu_read_ready[j] <= lsu_read_ready[lsu_index];
-                    core_lsu_read_data[j] <= lsu_read_data[lsu_index];
+
+                    // Each lane takes its read response from its leader's
+                    // controller channel; a leader's index is itself.
+                    core_lsu_read_ready[j] <= lsu_read_ready[i * THREADS_PER_BLOCK + read_leader_idx[j]];
+                    core_lsu_read_data[j] <= lsu_read_data[i * THREADS_PER_BLOCK + read_leader_idx[j]];
                     core_lsu_write_ready[j] <= lsu_write_ready[lsu_index];
                 end
                 // Atomic flag is combinational from LSU; forward without a
@@ -194,6 +259,29 @@ module gpu #(
                 // it samples consumer_read_valid.
                 assign lsu_atomic[lsu_index] = core_lsu_atomic[j];
             end
+
+            // Coalescing statistics: on the cycle a lane first raises its read
+            // request (rising edge of core_lsu_read_valid), if it is a follower
+            // its memory access was saved -- count it once.
+            integer cc;
+            reg [31:0] coalesced_this_cycle;
+            always @(posedge clk) begin
+                if (reset) begin
+                    core_coalesced_count <= 32'b0;
+                    prev_read_valid <= {THREADS_PER_BLOCK{1'b0}};
+                end else begin
+                    coalesced_this_cycle = 32'b0;
+                    for (cc = 0; cc < THREADS_PER_BLOCK; cc = cc + 1) begin
+                        if (core_lsu_read_valid[cc] && !prev_read_valid[cc]
+                            && !read_is_leader[cc]) begin
+                            coalesced_this_cycle = coalesced_this_cycle + 1;
+                        end
+                    end
+                    core_coalesced_count <= core_coalesced_count + coalesced_this_cycle;
+                    prev_read_valid <= core_lsu_read_valid;
+                end
+            end
+            assign core_coalesced_total[i] = core_coalesced_count;
 
             // Compute Core
             core #(
@@ -205,6 +293,7 @@ module gpu #(
             ) core_instance (
                 .clk(clk),
                 .reset(core_reset[i]),
+                .perf_reset(reset),
                 .start(core_start[i]),
                 .done(core_done[i]),
                 .block_id(core_block_id[i]),
@@ -223,8 +312,46 @@ module gpu #(
                 .data_mem_write_address(core_lsu_write_address),
                 .data_mem_write_data(core_lsu_write_data),
                 .data_mem_write_ready(core_lsu_write_ready),
-                .data_mem_atomic(core_lsu_atomic)
+                .data_mem_atomic(core_lsu_atomic),
+
+                .perf_cycle_count(core_perf_cycle_count[i]),
+                .perf_instr_count(core_perf_instr_count[i]),
+                .perf_divergence_count(core_perf_divergence_count[i]),
+                .perf_barrier_count(core_perf_barrier_count[i])
             );
         end
     endgenerate
+
+    // Aggregate per-core performance counters into the top-level outputs.
+    // Registered (rather than combinational) because Icarus does not build a
+    // reliable @(*) sensitivity list over unpacked-array element reads.
+    integer c;
+    reg [31:0] sum_cycle, sum_instr, sum_diverge, sum_barrier, sum_coalesced;
+    always @(posedge clk) begin
+        if (reset) begin
+            perf_cycle_count <= 32'b0;
+            perf_instr_count <= 32'b0;
+            perf_divergence_count <= 32'b0;
+            perf_barrier_count <= 32'b0;
+            perf_coalesced_count <= 32'b0;
+        end else begin
+            sum_cycle = 32'b0;
+            sum_instr = 32'b0;
+            sum_diverge = 32'b0;
+            sum_barrier = 32'b0;
+            sum_coalesced = 32'b0;
+            for (c = 0; c < NUM_CORES; c = c + 1) begin
+                sum_cycle = sum_cycle + core_perf_cycle_count[c];
+                sum_instr = sum_instr + core_perf_instr_count[c];
+                sum_diverge = sum_diverge + core_perf_divergence_count[c];
+                sum_barrier = sum_barrier + core_perf_barrier_count[c];
+                sum_coalesced = sum_coalesced + core_coalesced_total[c];
+            end
+            perf_cycle_count <= sum_cycle;
+            perf_instr_count <= sum_instr;
+            perf_divergence_count <= sum_diverge;
+            perf_barrier_count <= sum_barrier;
+            perf_coalesced_count <= sum_coalesced;
+        end
+    end
 endmodule

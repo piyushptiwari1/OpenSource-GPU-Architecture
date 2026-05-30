@@ -358,6 +358,46 @@
         "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Lint: Verilator (full src)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make lint_verilator"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Formal: smoke (dcr)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make formal_smoke"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Coverage: functional (cocotb-coverage)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "ulimit -n 4096 && make coverage_functional"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Setup: create build directory",
+      "problemMatcher": []
     }
   ],
   "inputs": [

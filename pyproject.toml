@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "cocotb>=2.0,<3.0",
     "cocotb-bus>=0.2.1",
+    "cocotb-coverage>=2.0",
     "cocotbext-axi>=0.1.24",
     "pyyaml>=6.0",
     "jinja2>=3.1",

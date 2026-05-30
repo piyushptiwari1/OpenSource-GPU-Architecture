@@ -294,6 +294,62 @@ instructions:
       pc_mux: 0
       ret: 0
 
+  - mnemonic: BAR
+    opcode: 0xC
+    type: Z
+    syntax: "BAR"
+    semantics: "block-wide barrier: every live thread waits until all live threads reach this instruction, then they proceed together (decoded_barrier asserted). Datapath no-op (PC+1); synchronisation is performed by the scheduler, so the control vector below is all zeros."
+    control:
+      reg_write_enable: 0
+      mem_read_enable: 0
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  # Load from per-block shared (on-chip) memory. Same datapath shape as LDR
+  # (Rd <- shmem[Rs], result routed through the LSU/MEMORY reg-input mux) but
+  # the LSU steers the request to the core-local banked shared_memory.sv island
+  # instead of the global data-memory controller. decoded_shared selects the
+  # shared port set. Shared memory is fast (single-bank-cycle), block-private,
+  # and the natural target for BAR-synchronised producer/consumer exchange.
+  - mnemonic: LDS
+    opcode: 0xD
+    type: R
+    syntax: "LDS Rd, Rs"
+    semantics: "Rd <- shmem[Rs]   (per-block shared memory)"
+    control:
+      reg_write_enable: 1
+      mem_read_enable: 1
+      mem_write_enable: 0
+      nzp_write_enable: 0
+      reg_input_mux: 1
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
+  # Store to per-block shared (on-chip) memory. Mirrors STR (shmem[Rs] <- Rt)
+  # but targets the shared_memory.sv island via decoded_shared.
+  - mnemonic: STS
+    opcode: 0xE
+    type: R
+    syntax: "STS Rs, Rt"
+    semantics: "shmem[Rs] <- Rt   (per-block shared memory)"
+    control:
+      reg_write_enable: 0
+      mem_read_enable: 0
+      mem_write_enable: 1
+      nzp_write_enable: 0
+      reg_input_mux: 0
+      alu_arithmetic_mux: 0
+      alu_output_mux: 0
+      pc_mux: 0
+      ret: 0
+
   - mnemonic: RET
     opcode: 0xF
     type: Z

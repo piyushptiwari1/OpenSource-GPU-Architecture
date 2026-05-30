@@ -27,6 +27,9 @@ module core #(
 ) (
     input wire clk,
     input wire reset,
+    // Full-GPU reset, used only to clear the performance counters (the regular
+    // `reset` is pulsed by the dispatcher per block to reuse this core).
+    input wire perf_reset,
 
     // Kernel Execution
     input wire start,
@@ -52,7 +55,13 @@ module core #(
     output reg [DATA_MEM_DATA_BITS-1:0] data_mem_write_data [THREADS_PER_BLOCK-1:0],
     input [THREADS_PER_BLOCK-1:0] data_mem_write_ready,
     // Per-lane atomic flag forwarded from each LSU to the data memory controller.
-    output wire [THREADS_PER_BLOCK-1:0] data_mem_atomic
+    output wire [THREADS_PER_BLOCK-1:0] data_mem_atomic,
+
+    // Performance counters (forwarded from this core's scheduler).
+    output wire [31:0] perf_cycle_count,
+    output wire [31:0] perf_instr_count,
+    output wire [31:0] perf_divergence_count,
+    output wire [31:0] perf_barrier_count
 );
     // State
     // These signals are shared across the entire core: every active lane sees them.
@@ -64,11 +73,26 @@ module core #(
     // The next PC, source operands, and LSU state are kept per thread lane.
     reg [7:0] current_pc;
     wire [7:0] next_pc[THREADS_PER_BLOCK-1:0];
+    // Per-lane execution mask produced by the scheduler's min-PC reconvergence:
+    // active_mask[i] is high only for lanes that should execute this step.
+    wire [THREADS_PER_BLOCK-1:0] active_mask;
     reg [7:0] rs[THREADS_PER_BLOCK-1:0];
     reg [7:0] rt[THREADS_PER_BLOCK-1:0];
     reg [1:0] lsu_state[THREADS_PER_BLOCK-1:0];
     reg [7:0] lsu_out[THREADS_PER_BLOCK-1:0];
     wire [7:0] alu_out[THREADS_PER_BLOCK-1:0];
+
+    // Per-block shared memory interface (one banked island shared by all lanes).
+    // Driven by each lane's LSU when it executes an LDS/STS (decoded_shared).
+    wire [THREADS_PER_BLOCK-1:0] shared_read_valid;
+    wire [7:0] shared_read_address [THREADS_PER_BLOCK-1:0];
+    wire [THREADS_PER_BLOCK-1:0] shared_read_ready;
+    wire [7:0] shared_read_data [THREADS_PER_BLOCK-1:0];
+    wire [THREADS_PER_BLOCK-1:0] shared_write_valid;
+    wire [7:0] shared_write_address [THREADS_PER_BLOCK-1:0];
+    wire [7:0] shared_write_data [THREADS_PER_BLOCK-1:0];
+    wire [THREADS_PER_BLOCK-1:0] shared_write_ready;
+    wire [THREADS_PER_BLOCK-1:0] shared_bank_conflict;
     // Decoded Instruction Signals
     reg [3:0] decoded_rd_address;
     reg [3:0] decoded_rs_address;
@@ -86,6 +110,8 @@ module core #(
     reg decoded_alu_output_mux;             // Select operation in ALU
     reg decoded_pc_mux;                     // Select source of next PC
     reg decoded_atomic_op;                  // 0=ATOMICADD, 1=ATOMICCAS
+    reg decoded_barrier;                    // BAR: block-wide synchronisation
+    reg decoded_shared;                     // LDS/STS: target shared memory
     reg decoded_ret;
 
     // Fetcher
@@ -125,24 +151,34 @@ module core #(
         .decoded_alu_output_mux(decoded_alu_output_mux),
         .decoded_pc_mux(decoded_pc_mux),
         .decoded_atomic_op(decoded_atomic_op),
+        .decoded_barrier(decoded_barrier),
+        .decoded_shared(decoded_shared),
         .decoded_ret(decoded_ret)
     );
 
     // Scheduler
     scheduler #(
-        .THREADS_PER_BLOCK(THREADS_PER_BLOCK),
+        .THREADS_PER_BLOCK(THREADS_PER_BLOCK)
     ) scheduler_instance (
         .clk(clk),
         .reset(reset),
+        .perf_reset(perf_reset),
         .start(start),
+        .thread_count(thread_count),
         .fetcher_state(fetcher_state),
         .core_state(core_state),
         .decoded_mem_read_enable(decoded_mem_read_enable),
         .decoded_mem_write_enable(decoded_mem_write_enable),
         .decoded_ret(decoded_ret),
+        .decoded_barrier(decoded_barrier),
         .lsu_state(lsu_state),
         .current_pc(current_pc),
         .next_pc(next_pc),
+        .active_mask(active_mask),
+        .perf_cycle_count(perf_cycle_count),
+        .perf_instr_count(perf_instr_count),
+        .perf_divergence_count(perf_divergence_count),
+        .perf_barrier_count(perf_barrier_count),
         .done(done)
     );
 
@@ -156,9 +192,10 @@ module core #(
             alu alu_instance (
                 .clk(clk),
                 .reset(reset),
-                // `i < thread_count` disables the surplus lanes in a partially-
-                // filled tail block.
-                .enable(i < thread_count),
+                // active_mask[i] gates this lane: it is high only when lane i is
+                // valid (within thread_count) AND parked at the block's current
+                // (minimum) PC, so diverged/surplus lanes are frozen.
+                .enable(active_mask[i]),
                 .core_state(core_state),
                 .decoded_alu_arithmetic_mux(decoded_alu_arithmetic_mux),
                 .decoded_alu_output_mux(decoded_alu_output_mux),
@@ -171,11 +208,12 @@ module core #(
             lsu lsu_instance (
                 .clk(clk),
                 .reset(reset),
-                .enable(i < thread_count),
+                .enable(active_mask[i]),
                 .core_state(core_state),
                 .decoded_mem_read_enable(decoded_mem_read_enable),
                 .decoded_mem_write_enable(decoded_mem_write_enable),
                 .decoded_atomic_op(decoded_atomic_op),
+                .decoded_shared(decoded_shared),
                 .mem_read_valid(data_mem_read_valid[i]),
                 .mem_read_address(data_mem_read_address[i]),
                 .mem_read_ready(data_mem_read_ready[i]),
@@ -185,6 +223,15 @@ module core #(
                 .mem_write_data(data_mem_write_data[i]),
                 .mem_write_ready(data_mem_write_ready[i]),
                 .consumer_atomic(data_mem_atomic[i]),
+                // Per-block shared-memory port set (LDS/STS).
+                .shared_read_valid(shared_read_valid[i]),
+                .shared_read_address(shared_read_address[i]),
+                .shared_read_ready(shared_read_ready[i]),
+                .shared_read_data(shared_read_data[i]),
+                .shared_write_valid(shared_write_valid[i]),
+                .shared_write_address(shared_write_address[i]),
+                .shared_write_data(shared_write_data[i]),
+                .shared_write_ready(shared_write_ready[i]),
                 .rs(rs[i]),
                 .rt(rt[i]),
                 .lsu_state(lsu_state[i]),
@@ -199,7 +246,7 @@ module core #(
             ) register_instance (
                 .clk(clk),
                 .reset(reset),
-                .enable(i < thread_count),
+                .enable(active_mask[i]),
                 .block_id(block_id),
                 .core_state(core_state),
                 .decoded_reg_write_enable(decoded_reg_write_enable),
@@ -221,7 +268,7 @@ module core #(
             ) pc_instance (
                 .clk(clk),
                 .reset(reset),
-                .enable(i < thread_count),
+                .enable(active_mask[i]),
                 .core_state(core_state),
                 .decoded_nzp(decoded_nzp),
                 .decoded_immediate(decoded_immediate),
@@ -231,10 +278,34 @@ module core #(
                 .current_pc(current_pc),
                 .next_pc(next_pc[i])
             );
-            // Note on SIMD control flow: each lane is allowed to compute its own
-            // `next_pc`, but in this simplified GPU the scheduler ultimately keeps
-            // a single shared PC for the whole block. Branch divergence is
-            // therefore not yet handled here.
+            // Note on SIMT control flow: each lane computes its own `next_pc`.
+            // The scheduler tracks a per-lane `thread_pc` and uses min-PC
+            // reconvergence to drive `active_mask`, so lanes that branch to
+            // different targets diverge and later reconverge automatically.
         end
     endgenerate
+
+    // Per-block shared memory: a banked on-chip scratchpad shared by every lane
+    // in this core/block. LDS/STS route here via each LSU's shared_* ports. The
+    // bank-conflict serialisation is absorbed by the scheduler's WAIT state,
+    // which holds the core until every lane's LSU leaves REQUESTING/WAITING.
+    shared_memory #(
+        .ADDR_BITS(DATA_MEM_ADDR_BITS),
+        .DATA_BITS(DATA_MEM_DATA_BITS),
+        .NUM_BANKS(THREADS_PER_BLOCK),
+        .BANK_SIZE(1 << (DATA_MEM_ADDR_BITS - $clog2(THREADS_PER_BLOCK))),
+        .NUM_PORTS(THREADS_PER_BLOCK)
+    ) shared_memory_instance (
+        .clk(clk),
+        .reset(reset),
+        .read_valid(shared_read_valid),
+        .read_addr(shared_read_address),
+        .read_ready(shared_read_ready),
+        .read_data(shared_read_data),
+        .write_valid(shared_write_valid),
+        .write_addr(shared_write_address),
+        .write_data(shared_write_data),
+        .write_ready(shared_write_ready),
+        .bank_conflict(shared_bank_conflict)
+    );
 endmodule

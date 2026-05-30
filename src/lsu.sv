@@ -20,6 +20,11 @@ module lsu (
     // 1 = ATOMICCAS (if old == 0 then mem[Rs] <- Rt)
     input decoded_atomic_op,
 
+    // Shared-memory address space selector (LDS/STS). When high, the request
+    // is routed to the core-local banked shared memory via the shared_* port
+    // set below instead of the global data-memory channel.
+    input decoded_shared,
+
     // Registers
     input [7:0] rs,
     input [7:0] rt,
@@ -33,6 +38,16 @@ module lsu (
     output reg [7:0] mem_write_address,
     output reg [7:0] mem_write_data,
     input mem_write_ready,
+
+    // Per-block Shared Memory (banked, single-cycle island)
+    output reg shared_read_valid,
+    output reg [7:0] shared_read_address,
+    input shared_read_ready,
+    input [7:0] shared_read_data,
+    output reg shared_write_valid,
+    output reg [7:0] shared_write_address,
+    output reg [7:0] shared_write_data,
+    input shared_write_ready,
 
     // LSU Outputs
     output reg [1:0] lsu_state,
@@ -70,9 +85,70 @@ module lsu (
             mem_write_address <= 0;
             mem_write_data <= 0;
             atomic_phase <= 0;
+            shared_read_valid <= 0;
+            shared_read_address <= 0;
+            shared_write_valid <= 0;
+            shared_write_address <= 0;
+            shared_write_data <= 0;
         end else if (enable) begin
+            // Shared-memory path (LDS/STS). Single-cycle banked island; reuses
+            // the same 4-state handshake but on the shared_* port set. Shared
+            // accesses are never atomic, so this branch is checked first.
+            if (decoded_shared) begin
+                if (decoded_mem_read_enable) begin
+                    unique case (lsu_state)
+                        IDLE: begin
+                            if (core_state == 3'b011) begin
+                                lsu_state <= REQUESTING;
+                            end
+                        end
+                        REQUESTING: begin
+                            shared_read_valid   <= 1;
+                            shared_read_address <= rs;
+                            lsu_state           <= WAITING;
+                        end
+                        WAITING: begin
+                            if (shared_read_ready) begin
+                                shared_read_valid <= 0;
+                                lsu_out           <= shared_read_data;
+                                lsu_state         <= DONE;
+                            end
+                        end
+                        DONE: begin
+                            if (core_state == 3'b110) begin
+                                lsu_state <= IDLE;
+                            end
+                        end
+                    endcase
+                end else if (decoded_mem_write_enable) begin
+                    unique case (lsu_state)
+                        IDLE: begin
+                            if (core_state == 3'b011) begin
+                                lsu_state <= REQUESTING;
+                            end
+                        end
+                        REQUESTING: begin
+                            shared_write_valid   <= 1;
+                            shared_write_address <= rs;
+                            shared_write_data    <= rt;
+                            lsu_state            <= WAITING;
+                        end
+                        WAITING: begin
+                            if (shared_write_ready) begin
+                                shared_write_valid <= 0;
+                                lsu_state          <= DONE;
+                            end
+                        end
+                        DONE: begin
+                            if (core_state == 3'b110) begin
+                                lsu_state <= IDLE;
+                            end
+                        end
+                    endcase
+                end
+            end
             // Atomic read-modify-write path (ATOMICADD).
-            if (is_atomic) begin
+            else if (is_atomic) begin
                 unique case (lsu_state)
                     IDLE: begin
                         if (core_state == 3'b011) begin

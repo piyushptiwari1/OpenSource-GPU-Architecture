@@ -349,6 +349,25 @@ Once the prerequisites are in place, run the kernel simulations with `make test_
 - For commercial simulators (VCS / Questa / Xcelium) use `make -f Makefile.sv ...` to drive the SystemVerilog sources directly without sv2v.
 - For full ASIC / SoC build flows (synthesis, DFT, floorplan, UPF) see `flow/commercial/` (Synopsys/Cadence/Vivado/Quartus, gated on `OPENGPU_COMMERCIAL=1`) or `flow/openlane2/` for the open sky130 path.
 
+### Fast quality gates (local)
+
+Use these top-level targets for quick pre-PR checks:
+
+```bash
+# Verilator syntax/lint over src/
+make lint_verilator
+
+# SymbiYosys smoke proof (current proven set: formal/dcr)
+make formal_smoke
+
+# Functional (MDV) coverage via cocotb-coverage; exports
+# test/coverage/functional_coverage.xml and asserts FSM closure
+make coverage_functional
+```
+
+If tools are missing, the targets fail with a setup hint (install Verilator and
+SymbiYosys/OSS CAD Suite, or use the project toolchain container).
+
 Executing the simulations will output a log file with the initial data memory state, complete execution trace of the kernel, and final data memory state.
 
 If you look at the initial data memory state logged at the start of the logfile for each, you should see the two start matrices for the calculation, and in the final data memory at the end of the file you should also see the resultant matrix.

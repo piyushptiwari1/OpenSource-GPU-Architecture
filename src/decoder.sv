@@ -34,6 +34,18 @@ module decoder (
     //   1 = ATOMICCAS : if mem[Rs] == 0 then mem[Rs] <- Rt
     output reg decoded_atomic_op,
 
+    // Block-wide barrier (BAR). From the datapath's point of view this is a
+    // no-op (PC+1, no reg/mem/branch); the synchronisation is handled by the
+    // scheduler, which holds every arriving lane until all live lanes have
+    // reached the barrier before releasing them together.
+    output reg decoded_barrier,
+
+    // Shared-memory address space selector (LDS/STS). When high, the LSU steers
+    // its memory request to the core-local banked shared_memory.sv island
+    // instead of the global data-memory controller. Only meaningful when one of
+    // mem_read_enable / mem_write_enable is also asserted.
+    output reg decoded_shared,
+
     // Return (finished executing thread)
     output reg decoded_ret
 );
@@ -49,6 +61,9 @@ module decoder (
         CONST = 4'b1001,
         ATOMICADD = 4'b1010,
         ATOMICCAS = 4'b1011,
+        BAR = 4'b1100,
+        LDS = 4'b1101,
+        STS = 4'b1110,
         RET = 4'b1111;
 
     always @(posedge clk) begin 
@@ -67,6 +82,8 @@ module decoder (
             decoded_alu_output_mux <= 0;
             decoded_pc_mux <= 0;
             decoded_atomic_op <= 0;
+            decoded_barrier <= 0;
+            decoded_shared <= 0;
             decoded_ret <= 0;
         end else begin 
             // Decode when core_state = DECODE
@@ -88,6 +105,8 @@ module decoder (
                 decoded_alu_output_mux <= 0;
                 decoded_pc_mux <= 0;
                 decoded_atomic_op <= 0;
+                decoded_barrier <= 0;
+                decoded_shared <= 0;
                 decoded_ret <= 0;
 
                 // Set the control signals for each instruction
@@ -156,6 +175,25 @@ module decoder (
                         decoded_mem_read_enable <= 1;
                         decoded_mem_write_enable <= 1;
                         decoded_atomic_op <= 1;
+                    end
+                    BAR: begin
+                        // Datapath no-op; scheduler performs the block-wide
+                        // synchronisation based on decoded_barrier.
+                        decoded_barrier <= 1;
+                    end
+                    LDS: begin
+                        // Load from per-block shared memory: Rd <- shmem[Rs].
+                        // Same control vector as LDR plus decoded_shared so the
+                        // LSU routes the request to the shared-memory island.
+                        decoded_reg_write_enable <= 1;
+                        decoded_reg_input_mux <= 2'b01;
+                        decoded_mem_read_enable <= 1;
+                        decoded_shared <= 1;
+                    end
+                    STS: begin
+                        // Store to per-block shared memory: shmem[Rs] <- Rt.
+                        decoded_mem_write_enable <= 1;
+                        decoded_shared <= 1;
                     end
                     RET: begin 
                         decoded_ret <= 1;

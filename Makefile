@@ -1,4 +1,4 @@
-.PHONY: test compile clean
+.PHONY: test compile clean lint_verilator formal_smoke coverage_functional
 
 export LIBPYTHON_LOC=$(shell cocotb-config --libpython)
 export PYGPI_PYTHON_BIN=$(shell cocotb-config --python-bin)
@@ -45,6 +45,7 @@ GPU_TOP_SRCS := \
     src/decoder.sv     \
     src/scheduler.sv   \
     src/lsu.sv         \
+    src/shared_memory.sv \
     src/registers.sv   \
     src/pc.sv
 
@@ -87,3 +88,35 @@ clean:
 	rmdir test/runs 2>/dev/null || true
 	rm -f iverilog_dump*
 	rm -f *.vcd
+
+# Fast SystemVerilog syntax/lint sanity pass over the full src tree.
+lint_verilator:
+	@command -v verilator >/dev/null 2>&1 || { \
+		echo "ERROR: verilator not found in PATH"; \
+		echo "Install Verilator or use the toolchain container."; \
+		exit 2; \
+	}
+	verilator --lint-only -Wall -Wno-fatal src/gpu_soc.sv src/*.sv
+
+# Functional (MDV) coverage: run the cocotb-coverage-instrumented e2e test,
+# which exports test/coverage/functional_coverage.xml and asserts FSM closure.
+coverage_functional:
+	rm -f build/gpu.v build/temp.v build/sim.vvp iverilog_dump_functional_coverage.sv
+	make test_functional_coverage
+	@echo "Functional coverage XML: test/coverage/functional_coverage.xml"
+
+# Formal smoke test (current proven set): DCR + scheduler/fetcher/dispatch FSMs.
+formal_smoke:
+	@command -v sby >/dev/null 2>&1 || { \
+		echo "ERROR: sby (SymbiYosys) not found in PATH"; \
+		echo "Use OSS CAD Suite or run the documented formal Docker command."; \
+		exit 2; \
+	}
+	rm -rf formal/dcr/dcr
+	cd formal/dcr && sby -f dcr.sby
+	rm -rf formal/scheduler/scheduler
+	cd formal/scheduler && sby -f scheduler.sby
+	rm -rf formal/fetcher/fetcher
+	cd formal/fetcher && sby -f fetcher.sby
+	rm -rf formal/dispatch/dispatch
+	cd formal/dispatch && sby -f dispatch.sby
