@@ -1,0 +1,16 @@
+[options]
+mode prove
+depth 20
+
+[engines]
+smtbmc yices
+
+[script]
+plugin -i slang
+read_slang --top scheduler_formal_top scheduler.sv scheduler_props.sv scheduler_formal_top.sv
+prep -top scheduler_formal_top
+
+[files]
+../../src/scheduler.sv
+scheduler_props.sv
+scheduler_formal_top.sv

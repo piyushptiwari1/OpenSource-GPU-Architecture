@@ -1,0 +1,17 @@
+[options]
+mode prove
+depth 20
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal -sv fetcher.sv
+read -formal -sv fetcher_props.sv
+read -formal -sv fetcher_formal_top.sv
+prep -top fetcher_formal_top
+
+[files]
+../../src/fetcher.sv
+fetcher_props.sv
+fetcher_formal_top.sv

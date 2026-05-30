@@ -1,0 +1,16 @@
+[options]
+mode bmc
+depth 30
+
+[engines]
+smtbmc yices
+
+[script]
+plugin -i slang
+read_slang --top dispatch_formal_top dispatch.sv dispatch_props.sv dispatch_formal_top.sv
+prep -top dispatch_formal_top
+
+[files]
+../../src/dispatch.sv
+dispatch_props.sv
+dispatch_formal_top.sv
