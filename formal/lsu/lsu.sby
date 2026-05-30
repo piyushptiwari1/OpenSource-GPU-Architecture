@@ -1,0 +1,17 @@
+[options]
+mode bmc
+depth 30
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal -sv lsu.sv
+read -formal -sv lsu_props.sv
+read -formal -sv lsu_formal_top.sv
+prep -top lsu_formal_top
+
+[files]
+../../src/lsu.sv
+lsu_props.sv
+lsu_formal_top.sv

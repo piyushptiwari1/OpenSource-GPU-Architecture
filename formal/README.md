@@ -50,6 +50,17 @@ consistent `` `timescale `` across all files in the elaboration.
   reachable state but not 1-step inductive; proving it by induction would need
   to probe the internal `start_execution` register (bind / RTL change), which
   we defer. Runtime ~1s.
+- `formal/lsu/`: 5 handshake invariants over the `lsu.sv` 4-state load/store FSM
+  — `reset_state`, `legal_transition` (incl. the atomic `WAITING->REQUESTING`
+  write re-issue), `valid_mutex` (at most one of the four global/shared
+  read/write request lines asserted at once), `addr_stable` (address + data +
+  valid held while a global request is outstanding), and `ack_clears_valid`
+  (no double-issue after ack). Uses an **assume-guarantee** env contract: the
+  upstream holds the decoded instruction + `enable` stable while a transaction
+  is in flight (`lsu_state != IDLE`), exactly the master-holds-request-stable
+  assumption used in AXI/valid-ready proofs. Proven by **BMC** (`mode bmc`,
+  depth 30) — the unconstrained internal `atomic_phase` flag makes the
+  invariants reachable-true but not 1-step inductive. Runtime ~9s.
 
 ## Next-up (intentionally not yet wired in)
 
@@ -58,8 +69,9 @@ Modules whose properties need either intrusive RTL changes or the
 
 - `pc.sv`     — branch-decision proofs need access to internal NZP
   register; requires an exported probe port or bind-based binding.
-- `lsu.sv`    — load/store handshake invariants analogous to the fetcher;
-  next natural increment.
+- `core.sv`   — top-level FSM sequencing proof tying scheduler/fetcher/lsu
+  handshakes together; needs internal-state probes for the cross-module
+  ordering invariants.
 
 ## Running locally
 

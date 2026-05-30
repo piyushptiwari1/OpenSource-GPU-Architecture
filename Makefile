@@ -105,7 +105,7 @@ coverage_functional:
 	make test_functional_coverage
 	@echo "Functional coverage XML: test/coverage/functional_coverage.xml"
 
-# Formal smoke test (current proven set): DCR + scheduler/fetcher/dispatch FSMs.
+# Formal smoke test (current proven set): DCR + scheduler/fetcher/dispatch/lsu FSMs.
 formal_smoke:
 	@command -v sby >/dev/null 2>&1 || { \
 		echo "ERROR: sby (SymbiYosys) not found in PATH"; \
@@ -120,3 +120,5 @@ formal_smoke:
 	cd formal/fetcher && sby -f fetcher.sby
 	rm -rf formal/dispatch/dispatch
 	cd formal/dispatch && sby -f dispatch.sby
+	rm -rf formal/lsu/lsu
+	cd formal/lsu && sby -f lsu.sby
