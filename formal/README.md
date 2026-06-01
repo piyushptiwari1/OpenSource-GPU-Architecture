@@ -94,11 +94,20 @@ consistent `` `timescale `` across all files in the elaboration.
   safety), keeping the multi-module BMC tractable while every control FSM stays
   fully modelled. Proven by **BMC** (`mode bmc`, depth 14) via the `slang`
   frontend. Runtime ~1 min.
+- `formal/alu/`: 7 result-correctness invariants over `alu.sv` — `reset_state`,
+  `cmp_result` (output_mux==1 yields the NZP compare word `{5'b0, rs<rt, rs==rt,
+  rs>rt}`), `add_result` / `sub_result` / `mul_result` / `div_result` (each
+  arithmetic opcode matches its spec; DIV guarded `rt != 0`, division by zero
+  left unconstrained exactly as the RTL leaves it), and `out_hold` (the result
+  register only changes on an enabled EXECUTE step). A self-checking reference-
+  model proof: the registered `alu_out` is compared against the spec recomputed
+  from the previous cycle's operands. Proven by **k-induction** (`mode prove`,
+  depth 10), so the guarantee is unbounded. Runtime <1s.
 
 ## Next-up (intentionally not yet wired in)
 
-- `alu.sv`    — combinational result-correctness per opcode; straightforward
-  BMC depth-1 check once the decode encoding is mirrored.
+- All core compute/control modules are now formally covered. Future candidates:
+  the cache / coalescer datapaths and the multi-core `gpu.sv` dispatch fabric.
 
 ## Running locally
 

@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [dcr, scheduler, fetcher, dispatch, lsu, pc, core]
+        module: [dcr, scheduler, fetcher, dispatch, lsu, pc, core, alu]
     steps:
       - uses: actions/checkout@v4
 

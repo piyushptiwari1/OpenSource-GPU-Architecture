@@ -106,7 +106,7 @@ coverage_functional:
 	@echo "Functional coverage XML: test/coverage/functional_coverage.xml"
 
 # Formal smoke test (current proven set): DCR + scheduler/fetcher/dispatch/lsu/pc
-# FSMs + the core cross-module integration proof.
+# FSMs + the core cross-module integration proof + the ALU result-correctness.
 formal_smoke:
 	@command -v sby >/dev/null 2>&1 || { \
 		echo "ERROR: sby (SymbiYosys) not found in PATH"; \
@@ -127,3 +127,5 @@ formal_smoke:
 	cd formal/pc && sby -f pc.sby
 	rm -rf formal/core/core
 	cd formal/core && sby -f core.sby
+	rm -rf formal/alu/alu
+	cd formal/alu && sby -f alu.sby
