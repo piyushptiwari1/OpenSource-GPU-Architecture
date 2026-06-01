@@ -61,17 +61,27 @@ consistent `` `timescale `` across all files in the elaboration.
   assumption used in AXI/valid-ready proofs. Proven by **BMC** (`mode bmc`,
   depth 30) — the unconstrained internal `atomic_phase` flag makes the
   invariants reachable-true but not 1-step inductive. Runtime ~9s.
+- `formal/pc/`: 7 branch-decision invariants over `pc.sv` — `reset_state`,
+  `seq_update` (non-branch advances `pc+1`), `branch_taken` (a BRnzp whose NZP
+  mask matches the latched flags jumps to the decoded immediate), `branch_
+  nottaken` (non-matching BRnzp falls through to `pc+1`), `nzp_latch` (a CMP in
+  UPDATE captures `alu_out[2:0]`), `nzp_hold` (NZP only changes on a CMP step),
+  and `pc_hold` (`next_pc` only changes on an EXECUTE step). **White-box**: the
+  formal top reads the internal `nzp` register through a hierarchical reference
+  (`u_pc.nzp`) so the exact branch *target* is proven, not merely that `next_pc`
+  is one of two values — no `bind` and no RTL change. Requires the `slang`
+  frontend (the built-in frontend rejects hierarchical references under
+  `` `default_nettype none ``). Proven by **k-induction** (`mode prove`, depth
+  20), so the guarantee is unbounded. Runtime <1s.
 
 ## Next-up (intentionally not yet wired in)
 
-Modules whose properties need either intrusive RTL changes or the
-`bind` directive to access internal state:
-
-- `pc.sv`     — branch-decision proofs need access to internal NZP
-  register; requires an exported probe port or bind-based binding.
-- `core.sv`   — top-level FSM sequencing proof tying scheduler/fetcher/lsu
-  handshakes together; needs internal-state probes for the cross-module
-  ordering invariants.
+- `core.sv`   — top-level FSM sequencing proof tying the scheduler / fetcher /
+  lsu / pc handshakes together; needs internal-state probes (white-box
+  hierarchical references, as in the `pc` proof) for the cross-module ordering
+  invariants.
+- `alu.sv`    — combinational result-correctness per opcode; straightforward
+  BMC depth-1 check once the decode encoding is mirrored.
 
 ## Running locally
 

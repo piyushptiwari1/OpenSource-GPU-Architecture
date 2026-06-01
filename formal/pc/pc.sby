@@ -1,0 +1,16 @@
+[options]
+mode prove
+depth 20
+
+[engines]
+smtbmc yices
+
+[script]
+plugin -i slang
+read_slang --top pc_formal_top pc.sv pc_props.sv pc_formal_top.sv
+prep -top pc_formal_top
+
+[files]
+../../src/pc.sv
+pc_props.sv
+pc_formal_top.sv
