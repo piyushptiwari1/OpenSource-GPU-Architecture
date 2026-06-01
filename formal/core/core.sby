@@ -1,0 +1,37 @@
+[options]
+mode bmc
+depth 14
+
+[engines]
+smtbmc yices
+
+[script]
+# slang frontend: required for the white-box hierarchical references
+# (u_core.core_state / u_core.fetcher_state) and the unpacked-array ports on
+# core.sv and its submodules.
+plugin -i slang
+read_slang --top core_formal_top \
+    core.sv fetcher.sv decoder.sv scheduler.sv alu.sv lsu.sv registers.sv \
+    pc.sv shared_memory.sv core_props.sv core_formal_top.sv
+# Datapath abstraction: the cross-module CONTROL handshakes proven here do not
+# depend on computed data values, so black-box the pure-datapath modules (ALU,
+# register file, shared-memory island). Their outputs become free symbolic
+# (a sound over-approximation for safety), which keeps the BMC formula small
+# and fast while leaving every control FSM (fetcher, decoder, scheduler, per-
+# lane LSU, pc) fully modelled. This is the standard datapath-cutpoint technique
+# for control-integration proofs.
+blackbox alu registers shared_memory
+prep -top core_formal_top
+
+[files]
+../../src/core.sv
+../../src/fetcher.sv
+../../src/decoder.sv
+../../src/scheduler.sv
+../../src/alu.sv
+../../src/lsu.sv
+../../src/registers.sv
+../../src/pc.sv
+../../src/shared_memory.sv
+core_props.sv
+core_formal_top.sv

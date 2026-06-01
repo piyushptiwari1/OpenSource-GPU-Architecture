@@ -73,13 +73,30 @@ consistent `` `timescale `` across all files in the elaboration.
   frontend (the built-in frontend rejects hierarchical references under
   `` `default_nettype none ``). Proven by **k-induction** (`mode prove`, depth
   20), so the guarantee is unbounded. Runtime <1s.
+- `formal/core/`: 6 **cross-module** sequencing invariants over the fully
+  elaborated `core.sv` (the integration / "capstone" proof) — `fetch_valid_
+  gated` (program memory driven only while the fetcher is FETCHING),
+  `fetch_starts_in_fetch` (fetcher leaves IDLE only when the scheduler reached
+  FETCH — the request edge), `decode_after_fetched` (scheduler advances
+  FETCH→DECODE only once the fetcher reports FETCHED — the acknowledge edge),
+  `fetcher_clears_on_decode` (fetcher retires FETCHED→IDLE only in DECODE — the
+  teardown), `mem_request_gated` (a lane's LSU drives the data-memory request
+  lines only in REQUEST/WAIT), and `done_in_done_state`. Whereas the per-module
+  proofs above each verify one FSM in isolation under an assume-guarantee
+  contract, this suite proves those independently-verified FSMs *compose*
+  correctly once wired together, with **no environment assumptions** (every core
+  input is free symbolic stimulus). **White-box**: the scheduler's and fetcher's
+  state registers are observed through hierarchical references
+  (`u_core.core_state`, `u_core.fetcher_state`) — no `bind`, no RTL change.
+  Uses **datapath abstraction** (`blackbox alu registers shared_memory`): the
+  control handshakes do not depend on computed data, so the pure-datapath
+  modules are cut to free symbolic outputs (a sound over-approximation for
+  safety), keeping the multi-module BMC tractable while every control FSM stays
+  fully modelled. Proven by **BMC** (`mode bmc`, depth 14) via the `slang`
+  frontend. Runtime ~1 min.
 
 ## Next-up (intentionally not yet wired in)
 
-- `core.sv`   — top-level FSM sequencing proof tying the scheduler / fetcher /
-  lsu / pc handshakes together; needs internal-state probes (white-box
-  hierarchical references, as in the `pc` proof) for the cross-module ordering
-  invariants.
 - `alu.sv`    — combinational result-correctness per opcode; straightforward
   BMC depth-1 check once the decode encoding is mirrored.
 
