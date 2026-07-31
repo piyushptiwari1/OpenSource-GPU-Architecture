@@ -1,18 +1,28 @@
 # Risks, Limitations, and Open Questions
 
+> **Update (2026-07):** this report predates the fork's architecture upgrades.
+> Items 1–3 below have since been implemented in the verified `gpu` top:
+> a per-warp-slice L1 instruction cache (`src/icache.sv` + `test_icache_e2e.py`),
+> min-PC branch divergence (`src/scheduler.sv` + `test_divergence_e2e.py`),
+> speculative-prefetch front-end pipelining (`src/fetcher.sv`), and multi-warp
+> latency hiding (`THREADS_PER_WARP` + `test_warp_scheduling_e2e.py`).
+> Item 4 (idealized memory timing) remains true for most tests, though
+> `test_warp_scheduling_e2e.py` now models fixed-latency memory. The original
+> text is preserved below as a snapshot of the pre-upgrade design.
+
 ## Confirmed current limitations
 
 These points are supported by the checked-in source, not merely by the README’s narrative.
 
-### 1. No implemented cache module
+### 1. No implemented cache module (resolved — see update note)
 
 The README describes cache as part of the architecture, but the source tree contains no cache module and `gpu.sv` instantiates no cache layer. This is the single largest source-to-documentation mismatch in the repo.
 
-### 2. No branch divergence support
+### 2. No branch divergence support (resolved — see update note)
 
 `scheduler.sv` contains an explicit TODO indicating that branch divergence is not implemented and that the current design assumes next-PC convergence. That keeps the design simple, but it also means kernels that require divergent per-thread control flow are out of scope.
 
-### 3. No pipelining or overlap beyond basic async memory waiting
+### 3. No pipelining or overlap beyond basic async memory waiting (resolved — see update note)
 
 The scheduler waits for one instruction lifecycle to finish before progressing to the next instruction. That matches the repository’s educational goal, but it also means throughput-oriented optimizations are intentionally absent.
 

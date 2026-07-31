@@ -122,11 +122,13 @@ The memory controllers keep track of all the outgoing requests to memory from th
 
 Each memory controller has a fixed number of channels based on the bandwidth of global memory.
 
-### Cache (WIP)
+### Instruction Cache
 
 The same data is often requested from global memory by multiple cores. Constantly access global memory repeatedly is expensive, and since the data has already been fetched once, it would be more efficient to store it on device in SRAM to be retrieved much quicker on later requests.
 
-This is exactly what the cache is used for. Data retrieved from external memory is stored in cache and can be retrieved from there on later requests, freeing up memory bandwidth to be used for new data.
+Each warp slice in every core owns a direct-mapped **L1 instruction cache** (`icache.sv`, 32 lines by default) sitting between its fetcher and the program memory controller. Only cache *misses* consume external fetch bandwidth; loop bodies are served on-chip. The cache is cleared only on a full GPU reset — program memory is immutable while a kernel runs, so it stays warm across all the blocks a core processes.
+
+Cache effectiveness is observable at the top level through the `perf_icache_hit_count` / `perf_icache_miss_count` counters, and `test/test_icache_e2e.py` asserts the architectural invariant that external program-memory transactions equal cache misses (matmul: 41 instructions retired with only 28 external fetches).
 
 ## Core
 
@@ -136,17 +138,22 @@ In this simplified GPU, each core processed one **block** at a time, and for eac
 
 ### Scheduler
 
-Each core has a single scheduler that manages the execution of threads.
+Each core partitions its block into **warps** of `THREADS_PER_WARP` lanes, and every warp has its own scheduler (warp slice). With the default `THREADS_PER_WARP = THREADS_PER_BLOCK` the whole block is one warp and the design behaves like the classic single-scheduler tiny-gpu. Setting a smaller warp size (e.g. `THREADS_PER_WARP = 2` with a block of 4) yields multiple concurrent warps per core that **hide each other's memory latency** — the defining trick of real GPU schedulers. On a latency-bound kernel, 2 warps/core cut execution from 868 to 647 cycles by overlapping one warp's ALU work with the other's memory waits (`test/test_warp_scheduling_e2e.py`).
 
-The tiny-gpu scheduler executes instructions for a single block to completion before picking up a new block, and it executes instructions for all threads in-sync and sequentially.
+Each warp scheduler runs the six-stage instruction lifecycle (`FETCH → DECODE → REQUEST → WAIT → EXECUTE → UPDATE`), with two throughput optimizations over the naive flow:
 
-In more advanced schedulers, techniques like **pipelining** are used to stream the execution of multiple instructions subsequent instructions to maximize resource utilization before previous instructions are fully complete. Additionally, **warp scheduling** can be use to execute multiple batches of threads within a block in parallel.
+- instructions that touch no memory **skip the `WAIT` stage** entirely, and
+- the fetch of the *next* instruction is **overlapped with execution** of the current one (see Fetcher below).
+
+The scheduler also implements **branch divergence** via min-PC reconvergence: every lane keeps its own PC, the scheduler executes the subset of lanes parked at the minimum PC each step, and diverged lanes automatically reconverge. Block-wide `BAR` barriers synchronise across *all* warps of the block through a per-core barrier coordinator.
 
 The main constraint the scheduler has to work around is the latency associated with loading & storing data from global memory. While most instructions can be executed synchronously, these load-store operations are asynchronous, meaning the rest of the instruction execution has to be built around these long wait times.
 
 ### Fetcher
 
-Asynchronously fetches the instruction at the current program counter from program memory (most should actually be fetching from cache after a single block is executed).
+Asynchronously fetches the instruction at the current program counter from its L1 instruction cache.
+
+The fetcher is a **pipelined front-end with speculative next-line prefetch**: as soon as the core moves into `DECODE`, the fetch port is free, so the fetcher immediately starts fetching the *predicted* next instruction while the rest of the pipeline executes the current one. Prediction is static **BTFN** (backward-taken / forward-not-taken): a `BRnzp` whose target is at or behind the current instruction is treated as a loop edge and predicted taken; everything else is predicted to fall through to `PC + 1`. A correct prediction turns the next `FETCH` stage into a single cycle; a misprediction is discarded and refetched (always correct, sometimes slower). Together with the icache and `WAIT`-skip this cuts matmul from 491 to 349 cycles (−29%) and matadd from 178 to 154 (−13%).
 
 ### Decoder
 
@@ -384,7 +391,22 @@ The whole GPU is also visualized in [*Digital*](https://github.com/hneemann/Digi
 
 # Advanced Functionality
 
-For the sake of simplicity, there were many additional features implemented in modern GPUs that heavily improve performance & functionality that tiny-gpu omits. We'll discuss some of those most critical features in this section.
+Modern GPUs implement many features beyond the minimal learning core. This fork has **implemented several of them in the verified `gpu` top** — each marked below with where it lives and the end-to-end test that proves it. The remaining ones stay documented as roadmap concepts.
+
+| Feature | Status | RTL | Proven by |
+|---|---|---|---|
+| L1 instruction cache (per warp slice) | ✅ implemented | `icache.sv` | `test_icache_e2e.py` |
+| Front-end pipelining (speculative prefetch, BTFN) | ✅ implemented | `fetcher.sv` | `test_matmul.py` (−29% cycles), full sweep |
+| `WAIT`-skip for non-memory instructions | ✅ implemented | `scheduler.sv` | full sweep |
+| Warp scheduling (multi-warp cores, latency hiding) | ✅ implemented | `core.sv` + `scheduler.sv` | `test_warp_scheduling_e2e.py` (−25% cycles) |
+| Branch divergence (min-PC reconvergence) | ✅ implemented | `scheduler.sv` | `test_divergence_e2e.py`, `test_nested_divergence.py` |
+| Warp-level memory coalescing (same-address reads) | ✅ implemented | `gpu.sv` | `test_coalesce_broadcast_e2e.py` |
+| Shared memory (banked, per block) | ✅ implemented | `shared_memory.sv` | `test_shared_memory_e2e.py` |
+| Barriers (block-wide, cross-warp) | ✅ implemented | `scheduler.sv` + `core.sv` | `test_barrier_e2e.py`, `test_warp_scheduling_e2e.py` |
+| Atomics (`ATOMICADD` / `ATOMICCAS`) | ✅ implemented | `lsu.sv` + `controller.sv` | `test_atomic_add.py`, `test_atomic_cas.py` |
+| Graphics kernel (SIMT rasterizer) | ✅ implemented | ISA kernel | `test_graphics_e2e.py` |
+| Data cache, multi-level hierarchy | roadmap | — | — |
+| Address-range (burst) coalescing | roadmap | — | — |
 
 ### Multi-layered Cache & Shared Memory
 
@@ -404,11 +426,7 @@ Memory coalescing is used to analyzing queued memory requests and combine neighb
 
 ### Pipelining
 
-In the control flow for tiny-gpu, cores wait for one instruction to be executed on a group of threads before starting execution of the next instruction.
-
-Modern GPUs use **pipelining** to stream execution of multiple sequential instructions at once while ensuring that instructions with dependencies on each other still get executed sequentially.
-
-This helps to maximize resource utilization within cores as resources are not sitting idle while waiting (ex: during async memory requests).
+In the original control flow, cores waited for one instruction to be fully executed before even *fetching* the next one. This fork overlaps the front-end with execution: the fetcher speculatively prefetches the BTFN-predicted next instruction while the current one moves through `REQUEST`/`WAIT`/`EXECUTE`/`UPDATE`, and non-memory instructions skip `WAIT` entirely. A full issue-pipeline with hazard tracking (scoreboards, operand collectors) remains future work.
 
 ### Warp Scheduling
 
@@ -416,29 +434,36 @@ Another strategy used to maximize resource utilization on course is **warp sched
 
 Multiple warps can be executed on a single core simultaneously by executing instructions from one warp while another warp is waiting. This is similar to pipelining, but dealing with instructions from different threads.
 
+This fork implements it: set `THREADS_PER_WARP < THREADS_PER_BLOCK` on the `gpu` top and each core partitions its block into independent warp slices (own fetcher + icache + decoder + scheduler) that share the block's datapath lanes, shared-memory island, and barrier coordinator. `test/test_warp_scheduling_e2e.py` builds the 2-warps-per-core configuration and measures 310 cycles of true overlap (one warp executing while another waits on memory) on a latency-bound kernel — 868 → 647 cycles vs. lockstep.
+
 ### Branch Divergence
 
-tiny-gpu assumes that all threads in a single batch end up on the same PC after each instruction, meaning that threads can be executed in parallel for their entire lifetime.
+The original tiny-gpu assumed that all threads in a single batch end up on the same PC after each instruction, meaning that threads can be executed in parallel for their entire lifetime.
 
-In reality, individual threads could diverge from each other and branch to different lines based on their data. With different PCs, these threads would need to split into separate lines of execution, which requires managing diverging threads & paying attention to when threads converge again.
+In reality, individual threads diverge from each other and branch to different lines based on their data. This fork implements **min-PC reconvergence**: every lane keeps its own PC, each step executes the lanes parked at the minimum PC of the warp, and lanes that branched ahead are frozen until the rest catch up — correct for structured control flow with no explicit IPDOM stack. Divergence is observable through the top-level `perf_divergence_count` counter and proven by `test_divergence_e2e.py` and `test_nested_divergence.py`.
 
 ### Synchronization & Barriers
 
 Another core functionality of modern GPUs is the ability to set **barriers** so that groups of threads in a block can synchronize and wait until all other threads in the same block have gotten to a certain point before continuing execution.
 
-This is useful for cases where threads need to exchange shared data with each other so they can ensure that the data has been fully processed.
+This fork implements a block-wide `BAR` instruction. Lanes of a warp park at the barrier while lagging lanes catch up; in multi-warp configurations a per-core coordinator releases every warp only once *all* live warps of the block have arrived — with retired warps correctly excluded so a block can never deadlock on a barrier a finished warp will never reach.
 
 # Next Steps
 
-Updates I want to make in the future to improve the design, anyone else is welcome to contribute as well:
+Roadmap status — items from the original tiny-gpu wishlist that this fork has completed, plus what remains:
 
-- [ ] Add a simple cache for instructions
-- [ ] Build an adapter to use GPU with Tiny Tapeout 7
-- [ ] Add basic branch divergence
-- [ ] Add basic memory coalescing
-- [ ] Add basic pipelining
-- [ ] Optimize control flow and use of registers to improve cycle time
-- [ ] Write a basic graphics kernel or add simple graphics hardware to demonstrate graphics functionality
+- [x] Add a simple cache for instructions — per-warp-slice direct-mapped L1I (`icache.sv`), proven by `test_icache_e2e.py`
+- [x] Build an adapter to use GPU with Tiny Tapeout 7 — `tt_um_tiny_gpu.sv`, tested via `make test_tt_adapter` (5 subtests)
+- [x] Add basic branch divergence — min-PC reconvergence in `scheduler.sv`
+- [x] Add basic memory coalescing — warp-level same-address read coalescing in `gpu.sv`
+- [x] Add basic pipelining — speculative BTFN prefetch overlapped with execution (`fetcher.sv`)
+- [x] Optimize control flow and use of registers to improve cycle time — `WAIT`-skip + single-cycle predicted fetch (matmul −29%, matadd −13%)
+- [x] Write a basic graphics kernel — SIMT edge-function rasterizer, `test_graphics_e2e.py`
+- [x] Warp scheduling — multi-warp cores with cross-warp barriers (`THREADS_PER_WARP` parameter)
+- [ ] Data cache (L1D) + multi-level cache hierarchy
+- [ ] Address-range (burst) coalescing for strided access patterns
+- [ ] Scoreboarded issue pipeline (multiple instructions in flight per warp)
+- [ ] Dedicated graphics hardware path (the `rasterizer.sv` / `framebuffer.sv` SoC modules are not yet wired into the verified `gpu` top)
 
 **For anyone curious to play around or make a contribution, feel free to put up a PR with any improvements you'd like to add 😄**
 

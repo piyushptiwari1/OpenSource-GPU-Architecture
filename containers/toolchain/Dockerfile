@@ -119,6 +119,7 @@ RUN pip install \
         'pytest-cov>=5.0,<6' \
         'cocotb>=1.9,<2' \
         'cocotb-test>=0.2,<1' \
+        'cocotb-coverage>=1.2,<2' \
         'pre-commit>=3.7,<5'
 
 # ---------- 5. final ----------

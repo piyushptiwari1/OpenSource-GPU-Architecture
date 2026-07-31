@@ -4,27 +4,27 @@ Source: `src/core.sv`
 
 ## What this module is
 
-`core.sv` is the main compute engine for one block of threads. If the smaller module docs explain the **parts**, this file explains how those parts are assembled into one working SIMD-style core.
+`core.sv` is the main compute engine for one block of threads. If the smaller module docs explain the **parts**, this file explains how those parts are assembled into one working SIMT core.
 
-The key beginner mental model is this:
+The key mental model is this:
 
-- **one shared control path** per core
-- **many replicated thread lanes** per core
+- the block's threads are partitioned into **warps** of `THREADS_PER_WARP` lanes
+- each warp gets **one shared control path** (fetcher + icache + decoder + scheduler)
+- each thread lane gets **its own replicated datapath** (registers, alu, lsu, pc)
 
-So the core behaves like **one instruction stream controlling several per-thread datapaths in parallel**.
-
-This matches the repo's DeepWiki architecture model: the core contains a fetcher, decoder, scheduler, and per-thread execution units.
+So the core behaves like **one or more independent instruction streams, each controlling several per-thread datapaths in parallel**. With the default `THREADS_PER_WARP = THREADS_PER_BLOCK` the whole block is a single warp — the classic tiny-gpu shape. With a smaller warp size, multiple warps run concurrently and hide each other's memory latency (real-GPU warp scheduling).
 
 ## Where it sits in tiny-gpu
 
 - **Upstream:** `dispatch.sv` starts the core on a specific block and tells it `block_id` and `thread_count`
 - **Inside the core:**
-  - shared modules: `fetcher`, `decoder`, `scheduler`
+  - per-warp-slice modules: `fetcher`, `icache`, `decoder`, `scheduler`
   - per-thread modules: `registers`, `alu`, `lsu`, `pc`
+  - per-core modules: banked `shared_memory` island, cross-warp barrier coordinator
 - **Downstream:**
-  - program-memory controller sees fetch traffic
+  - program-memory controller sees one fetch channel per warp slice (misses only, thanks to the icache)
   - data-memory controller sees LSU traffic
-  - dispatcher sees `done`
+  - dispatcher sees `done` (AND of all warps' done)
 
 ## Clock/reset and when work happens
 
@@ -39,17 +39,19 @@ This matches the repo's DeepWiki architecture model: the core contains a fetcher
 |---|---|
 | `start`, `done` | per-block launch and completion handshake |
 | `block_id`, `thread_count` | metadata for the currently assigned block |
-| `program_mem_*` | one shared instruction fetch interface for the whole core |
+| `program_mem_*[w]` | one instruction-fetch channel per warp slice (behind that slice's icache) |
 | `data_mem_read_*`, `data_mem_write_*` | per-thread data-memory interfaces for LSU traffic |
-| `core_state`, `instruction`, decoded signals | shared control-path signals inside the core |
+| `core_state[w]`, `instruction[w]`, decoded bundles | per-warp control-path signals |
 | `rs/rt`, `alu_out`, `lsu_out`, `next_pc` arrays | per-thread lane datapath signals |
+| `perf_*` | aggregated performance counters (cycles, instrs, divergence, barrier, icache hits/misses) |
 
 ## Diagram
 
 ```mermaid
 flowchart TD
-    subgraph SharedControl["Shared per-core control path"]
+    subgraph SharedControl["Warp-slice control path (one per warp)"]
         S["scheduler"] --> F["fetcher"]
+        F --> IC["icache"]
         F --> D["decoder"]
         D --> CTRL["decoded control bundle"]
         S --> STAGE["core_state"]
@@ -75,9 +77,9 @@ flowchart TD
     STAGE --> P0
     CPC --> F
     CPC --> P0
-    F --> PMEM["program memory interface"]
+    IC --> PMEM["program memory interface (misses only)"]
     L0 --> DMEM["data memory interface for this lane"]
-    NPC --> MERGE["scheduler assumes active lanes converge"]
+    NPC --> MERGE["scheduler reconverges lanes at the minimum PC"]
     MERGE --> S
 ```
 
@@ -95,42 +97,46 @@ That is why `core.sv` has many wires/regs and many module instantiations, but re
 ## Behavior walkthrough
 
 1. The dispatcher gives this core a `block_id` and `thread_count`.
-2. The scheduler starts in charge of the block's instruction lifecycle.
-3. The fetcher retrieves one instruction from program memory using the shared `current_pc`.
-4. The decoder turns that instruction into shared control signals.
-5. Those shared control signals are broadcast to **all active thread lanes**.
+2. Each warp slice's scheduler independently runs its warp's instruction lifecycle.
+3. The warp's fetcher retrieves one instruction through its icache using the warp's `current_pc`.
+4. The warp's decoder turns that instruction into control signals.
+5. Those control signals are broadcast to **the active thread lanes of that warp**.
 6. Inside each lane:
    - `registers` provides operands
    - `alu` computes arithmetic or compare results
    - `lsu` performs memory access if needed
    - `pc` computes that lane's `next_pc`
-7. The scheduler later decides whether the block is done or moves to the next instruction.
+7. The warp's scheduler decides whether the warp is done or moves to its next instruction; the core is done when every warp is done.
 
 ## Shared path vs replicated path
 
 This is the most important structural idea in the file.
 
-### Shared per-core pieces
+### Per-warp-slice pieces
 
-- `fetcher`
+- `fetcher` (with speculative prefetch)
+- `icache` (L1 instruction cache)
 - `decoder`
 - `scheduler`
-- one shared `instruction`
-- one shared `current_pc`
-- one shared bundle of decoded control signals
+- one `instruction` latch, one `current_pc`, one decoded control bundle
 
-These exist only once per core because the tiny-gpu executes one instruction stream per block.
+These exist once per *warp* because each warp executes its own instruction stream. With one warp per block they are effectively per-core, matching the original design.
 
 ### Replicated per-thread pieces
 
-Inside the `generate` loop, every thread lane gets its own:
+Inside the nested `generate` loops, every thread lane gets its own:
 
 - `alu`
 - `lsu`
 - `registers`
 - `pc`
 
-This is how the same instruction can operate on different thread-local data at the same time.
+This is how the same instruction can operate on different thread-local data at the same time. A lane's control signals come from its *owning warp's* decoded bundle — no cross-warp muxing is ever needed because lane-to-warp ownership is static (`warp = lane / THREADS_PER_WARP`).
+
+### Per-core pieces
+
+- the banked `shared_memory` island (all lanes of all warps share it — that is the point of `LDS`/`STS`)
+- the cross-warp barrier coordinator: each warp scheduler reports `warp_at_barrier`; when every live warp of the block has arrived, the coordinator releases them all in the same cycle (retired warps are excluded so a barrier can never deadlock on a warp that already finished)
 
 ## The `generate` loop
 
@@ -170,20 +176,16 @@ Meaning:
 
 This is how one physical core can still execute a short last block safely.
 
-## The key simplification: converged PC
+## The key control model: min-PC reconvergence per warp
 
 Look closely at this structure:
 
 - each lane computes `next_pc[i]`
-- but the scheduler later chooses one representative `next_pc`
+- the warp's scheduler tracks a per-lane `thread_pc` and executes the lanes parked at the warp's *minimum* PC each step
 
-This reflects one of the repo's biggest simplifications:
+This is real branch-divergence support (not the original converged-PC simplification): lanes that branch ahead are frozen and automatically reconverge when the rest catch up. See [`scheduler.md`](./scheduler.md) for the full model.
 
-> all active threads in a block are assumed to converge back to the same PC
-
-Real GPUs must deal with branch divergence much more carefully.
-
-So `core.sv` is the place where the repo's simplified SIMD control model becomes most visible.
+So `core.sv` is the place where the SIMT execution hierarchy — block → warps → lanes — becomes most visible.
 
 ## Timing notes
 
@@ -195,9 +197,9 @@ So `core.sv` is the place where the repo's simplified SIMD control model becomes
 
 - Thinking `core.sv` contains the actual arithmetic/memory algorithms. Most of those live in submodules.
 - Thinking the `generate` loop is software-style iteration. It is hardware replication.
-- Forgetting that this core processes **one block at a time**, not one thread at a time.
+- Forgetting that this core processes **one block at a time**, not one thread at a time — but the block's warps *do* run concurrently.
 - Missing the difference between:
-  - shared control state (`core_state`, `instruction`, `current_pc`)
+  - per-warp control state (`core_state[w]`, `instruction[w]`, `current_pc[w]`)
   - per-thread datapath state (`rs[i]`, `registers`, `lsu_state[i]`, `next_pc[i]`)
 
 ## Trace-it-yourself

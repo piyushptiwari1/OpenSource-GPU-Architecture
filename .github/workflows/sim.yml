@@ -56,13 +56,14 @@ jobs:
           - perf_counters
           - rasterizer
           - pipeline
-          # NOTE: coalescer temporarily excluded -- the cocotb test drives
-          # thread_read_address[i] as packed words, but after sv2v flattening
-          # iverilog reports each element as a 1-bit slice (OverflowError).
-          # Tracked as a follow-up RTL/test fix.
+          # NOTE: coalescer is temporarily excluded.
+          # The cocotb test drives `thread_read_address[i]` as packed words,
+          # but after sv2v flattening iverilog reports each element as a
+          # 1-bit slice -> OverflowError. Tracked as follow-up RTL/test fix
+          # (see issues board: "Fix coalescer cocotb signal flattening").
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Tool versions
         run: |
@@ -72,7 +73,6 @@ jobs:
           which sv2v && sv2v --version || true
           which cocotb-config && cocotb-config --version || true
           which python3 && python3 --version
-          find /opt/oss-cad-suite -maxdepth 4 -name 'libpython*.so*' 2>/dev/null | head -5 || true
 
       - name: Run ${{ matrix.test }}
         run: |
@@ -80,11 +80,8 @@ jobs:
           # Use our pinned cocotb (in /opt/venv) instead of the broken cocotb
           # 2.0.0.dev pre-release that ships with OSS CAD Suite. iverilog/vvp
           # are Python-agnostic; libcocotb.so resolves libpython via ld.so
-          # default search paths (Ubuntu /usr/lib/x86_64-linux-gnu).
-          # Prefer /opt/venv (cocotb 1.9.x) and /usr/bin (system iverilog/vvp,
-          # ABI-compatible with system libpython3.12) over OSS CAD Suite
-          # which ships its own libm and conflicts with system libpython.
-          export PATH="/opt/venv/bin:/usr/bin:$PATH"
+          # default search paths (Ubuntu's /usr/lib/x86_64-linux-gnu).
+          export PATH="/opt/venv/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
           rm -f results.xml
           make -f Makefile.vlsi test_${{ matrix.test }}
@@ -96,16 +93,14 @@ jobs:
           python3 - <<'PY'
           import sys, xml.etree.ElementTree as ET
           root = ET.parse('results.xml').getroot()
-          # cocotb 1.x JUnit XML: count <testcase> directly; failures/errors
-          # are detected via nested <failure>/<error> elements rather than
-          # numeric attributes on <testsuite>.
-          cases = list(root.iter('testcase'))
-          if not cases:
-              print('::error::no <testcase> in results.xml', file=sys.stderr)
+          # cocotb emits a JUnit <testsuites> root with nested <testsuite>.
+          suites = list(root.iter('testsuite'))
+          if not suites:
+              print('::error::no <testsuite> in results.xml', file=sys.stderr)
               sys.exit(1)
-          fails = sum(1 for c in cases if c.find('failure') is not None)
-          errs  = sum(1 for c in cases if c.find('error')   is not None)
-          tests = len(cases)
+          fails = sum(int(s.get('failures', 0)) for s in suites)
+          errs  = sum(int(s.get('errors',   0)) for s in suites)
+          tests = sum(int(s.get('tests',    0)) for s in suites)
           print(f'tests={tests} failures={fails} errors={errs}')
           sys.exit(1 if fails or errs or not tests else 0)
           PY
@@ -126,25 +121,34 @@ jobs:
   # End-to-end GPU kernel tests (root Makefile).
   # ------------------------------------------------------------
   gpu-e2e:
-    # Non-gating: end-to-end kernel tests compile the entire src/ tree
-    # (53 SystemVerilog files) into a single Verilog blob. Newer enterprise
-    # modules added on top of upstream tiny-gpu produce sv2v collisions
-    # (duplicate 'dcr' module, syntax errors). Tracked as a follow-up to
-    # curate a minimal SRCS list for the GPU top.
     name: ${{ matrix.test }} (gpu top, iverilog)
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/piyushptiwari1/opengpu-toolchain:latest
       options: --user root
     timeout-minutes: 25
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        test: [matadd, matmul, atomic_add, atomic_cas]
+        test:
+          - matadd
+          - matmul
+          - atomic_add
+          - atomic_cas
+          - divergence_e2e
+          - nested_divergence
+          - shared_memory_e2e
+          - barrier_e2e
+          - perf_counters_e2e
+          - coalesce_broadcast_e2e
+          - icache_e2e
+          - warp_scheduling_e2e
+          - graphics_e2e
+          - functional_coverage
+          - tt_adapter
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Tool versions
         run: |
@@ -158,11 +162,14 @@ jobs:
       - name: Run ${{ matrix.test }} kernel
         run: |
           set -euo pipefail
-          # Prefer /opt/venv (cocotb 1.9.x) and /usr/bin (system iverilog/vvp,
-          # ABI-compatible with system libpython3.12) over OSS CAD Suite
-          # which ships its own libm and conflicts with system libpython.
-          export PATH="/opt/venv/bin:/usr/bin:$PATH"
+          export PATH="/opt/venv/bin:$PATH"
           cd "$GITHUB_WORKSPACE"
+          # functional_coverage needs cocotb-coverage; present in newer
+          # toolchain images, installed on the fly for older ones.
+          if [ "${{ matrix.test }}" = "functional_coverage" ]; then
+            python3 -c 'import cocotb_coverage' 2>/dev/null || \
+              pip install 'cocotb-coverage>=1.2,<2'
+          fi
           rm -f results.xml
           make test_${{ matrix.test }}
 
@@ -173,16 +180,10 @@ jobs:
           python3 - <<'PY'
           import sys, xml.etree.ElementTree as ET
           root = ET.parse('results.xml').getroot()
-          # cocotb 1.x JUnit XML: count <testcase> directly; failures/errors
-          # are detected via nested <failure>/<error> elements rather than
-          # numeric attributes on <testsuite>.
-          cases = list(root.iter('testcase'))
-          if not cases:
-              print('::error::no <testcase> in results.xml', file=sys.stderr)
-              sys.exit(1)
-          fails = sum(1 for c in cases if c.find('failure') is not None)
-          errs  = sum(1 for c in cases if c.find('error')   is not None)
-          tests = len(cases)
+          suites = list(root.iter('testsuite'))
+          fails = sum(int(s.get('failures', 0)) for s in suites)
+          errs  = sum(int(s.get('errors',   0)) for s in suites)
+          tests = sum(int(s.get('tests',    0)) for s in suites)
           print(f'tests={tests} failures={fails} errors={errs}')
           sys.exit(1 if fails or errs or not tests else 0)
           PY
@@ -214,10 +215,9 @@ jobs:
           set -euo pipefail
           mt='${{ needs.module-tests.result }}'
           ee='${{ needs.gpu-e2e.result }}'
-          echo "module-tests (gating):     $mt"
-          echo "gpu-e2e      (informational): $ee"
-          # gpu-e2e is non-gating until the src/ tree is curated for sv2v.
-          if [ "$mt" != "success" ]; then
-            echo "::error::module-tests failed"
+          echo "module-tests: $mt"
+          echo "gpu-e2e:      $ee"
+          if [ "$mt" != "success" ] || [ "$ee" != "success" ]; then
+            echo "::error::one or more simulation jobs failed"
             exit 1
           fi

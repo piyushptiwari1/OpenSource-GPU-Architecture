@@ -60,6 +60,29 @@ Issues left intentionally open because they require external work or are out
 of scope for this fork (Linux driver, RISC-V interfacing, Chisel port,
 translations, hardware recommendations, ISA compiler) are tracked upstream.
 
+## Architecture upgrades (beyond upstream)
+
+On top of the merged community work, this fork advances the verified `gpu`
+top from the original learning-level control flow to an industry-style SIMT
+microarchitecture. Every feature below is integrated into the default build
+(`make compile`), covered by an end-to-end cocotb test, and kept green across
+the full sweep.
+
+| Feature | RTL | Verified by |
+|---------|-----|-------------|
+| Per-warp-slice L1 instruction cache (direct-mapped, warm across blocks; only misses reach program memory) | `src/icache.sv`, wired in `src/core.sv` | `test/test_icache_e2e.py` (external fetch beats == misses) |
+| Pipelined front-end: speculative next-line prefetch with static BTFN branch prediction, overlapped with EXECUTE/UPDATE | `src/fetcher.sv` | full sweep; matmul 491 → 349 cycles (−29%), matadd 178 → 154 (−13%) |
+| `WAIT`-stage skip for non-memory instructions | `src/scheduler.sv` | full sweep |
+| Multi-warp SIMT cores: block partitioned into warp slices (own fetcher + icache + decoder + scheduler), independent per-warp FSMs hide each other's memory latency | `src/core.sv` (`THREADS_PER_WARP` parameter, default = whole block) | `test/test_warp_scheduling_e2e.py`: latency-bound kernel 868 → 647 cycles (−25%), 310 measured overlap cycles |
+| Cross-warp block barrier coordinator (BAR synchronises all live warps; retired warps excluded, deadlock-free) | `src/core.sv` + `src/scheduler.sv` | `test/test_warp_scheduling_e2e.py`, `test/test_barrier_e2e.py` |
+| Graphics: SIMT edge-function rasterizer kernel rendering a triangle into a framebuffer region with per-pixel divergence | ISA kernel (no new RTL) | `test/test_graphics_e2e.py` |
+| Tiny Tapeout 7 adapter test target in the main cocotb v2 flow | `src/tt_um_tiny_gpu.sv` (from PR #55) | `make test_tt_adapter` (5 subtests) |
+| Top-level observability: `perf_icache_hit/miss_count` counters joining the existing cycle/instr/divergence/barrier/coalesce counters | `src/gpu.sv` | perf/e2e tests |
+
+The formal harnesses (`formal/fetcher`, `formal/scheduler`, `formal/core`)
+were extended for the new speculative fetcher states, the WAIT-skip edge, and
+the per-warp program-memory port shape.
+
 ## Author / credits
 
 The original architecture, ISA, and Verilog source are by
