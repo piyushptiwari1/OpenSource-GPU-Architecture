@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1135,10 +1135,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#shared-per-core-pieces" class="md-nav__link">
+  <a href="#per-warp-slice-pieces" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Shared per-core pieces
+        Per-warp-slice pieces
       
     </span>
   </a>
@@ -1150,6 +1150,17 @@
     <span class="md-ellipsis">
       
         Replicated per-thread pieces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-core-pieces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-core pieces
       
     </span>
   </a>
@@ -1184,10 +1195,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-key-simplification-converged-pc" class="md-nav__link">
+  <a href="#the-key-control-model-min-pc-reconvergence-per-warp" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The key simplification: converged PC
+        The key control model: min-PC reconvergence per warp
       
     </span>
   </a>
@@ -1904,10 +1915,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#shared-per-core-pieces" class="md-nav__link">
+  <a href="#per-warp-slice-pieces" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Shared per-core pieces
+        Per-warp-slice pieces
       
     </span>
   </a>
@@ -1919,6 +1930,17 @@
     <span class="md-ellipsis">
       
         Replicated per-thread pieces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-core-pieces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-core pieces
       
     </span>
   </a>
@@ -1953,10 +1975,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-key-simplification-converged-pc" class="md-nav__link">
+  <a href="#the-key-control-model-min-pc-reconvergence-per-warp" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The key simplification: converged PC
+        The key control model: min-PC reconvergence per warp
       
     </span>
   </a>
@@ -2043,24 +2065,25 @@
 <h1 id="core-module">Core Module<a class="headerlink" href="#core-module" title="Permanent link">&para;</a></h1>
 <p>Source: <code>src/core.sv</code></p>
 <h2 id="what-this-module-is">What this module is<a class="headerlink" href="#what-this-module-is" title="Permanent link">&para;</a></h2>
-<p><code>core.sv</code> is the main compute engine for one block of threads. If the smaller module docs explain the <strong>parts</strong>, this file explains how those parts are assembled into one working SIMD-style core.</p>
-<p>The key beginner mental model is this:</p>
+<p><code>core.sv</code> is the main compute engine for one block of threads. If the smaller module docs explain the <strong>parts</strong>, this file explains how those parts are assembled into one working SIMT core.</p>
+<p>The key mental model is this:</p>
 <ul>
-<li><strong>one shared control path</strong> per core</li>
-<li><strong>many replicated thread lanes</strong> per core</li>
+<li>the block's threads are partitioned into <strong>warps</strong> of <code>THREADS_PER_WARP</code> lanes</li>
+<li>each warp gets <strong>one shared control path</strong> (fetcher + icache + decoder + scheduler)</li>
+<li>each thread lane gets <strong>its own replicated datapath</strong> (registers, alu, lsu, pc)</li>
 </ul>
-<p>So the core behaves like <strong>one instruction stream controlling several per-thread datapaths in parallel</strong>.</p>
-<p>This matches the repo's DeepWiki architecture model: the core contains a fetcher, decoder, scheduler, and per-thread execution units.</p>
+<p>So the core behaves like <strong>one or more independent instruction streams, each controlling several per-thread datapaths in parallel</strong>. With the default <code>THREADS_PER_WARP = THREADS_PER_BLOCK</code> the whole block is a single warp — the classic tiny-gpu shape. With a smaller warp size, multiple warps run concurrently and hide each other's memory latency (real-GPU warp scheduling).</p>
 <h2 id="where-it-sits-in-tiny-gpu">Where it sits in tiny-gpu<a class="headerlink" href="#where-it-sits-in-tiny-gpu" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Upstream:</strong> <code>dispatch.sv</code> starts the core on a specific block and tells it <code>block_id</code> and <code>thread_count</code></li>
 <li><strong>Inside the core:</strong></li>
-<li>shared modules: <code>fetcher</code>, <code>decoder</code>, <code>scheduler</code></li>
+<li>per-warp-slice modules: <code>fetcher</code>, <code>icache</code>, <code>decoder</code>, <code>scheduler</code></li>
 <li>per-thread modules: <code>registers</code>, <code>alu</code>, <code>lsu</code>, <code>pc</code></li>
+<li>per-core modules: banked <code>shared_memory</code> island, cross-warp barrier coordinator</li>
 <li><strong>Downstream:</strong></li>
-<li>program-memory controller sees fetch traffic</li>
+<li>program-memory controller sees one fetch channel per warp slice (misses only, thanks to the icache)</li>
 <li>data-memory controller sees LSU traffic</li>
-<li>dispatcher sees <code>done</code></li>
+<li>dispatcher sees <code>done</code> (AND of all warps' done)</li>
 </ul>
 <h2 id="clockreset-and-when-work-happens">Clock/reset and when work happens<a class="headerlink" href="#clockreset-and-when-work-happens" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2087,27 +2110,32 @@
 <td>metadata for the currently assigned block</td>
 </tr>
 <tr>
-<td><code>program_mem_*</code></td>
-<td>one shared instruction fetch interface for the whole core</td>
+<td><code>program_mem_*[w]</code></td>
+<td>one instruction-fetch channel per warp slice (behind that slice's icache)</td>
 </tr>
 <tr>
 <td><code>data_mem_read_*</code>, <code>data_mem_write_*</code></td>
 <td>per-thread data-memory interfaces for LSU traffic</td>
 </tr>
 <tr>
-<td><code>core_state</code>, <code>instruction</code>, decoded signals</td>
-<td>shared control-path signals inside the core</td>
+<td><code>core_state[w]</code>, <code>instruction[w]</code>, decoded bundles</td>
+<td>per-warp control-path signals</td>
 </tr>
 <tr>
 <td><code>rs/rt</code>, <code>alu_out</code>, <code>lsu_out</code>, <code>next_pc</code> arrays</td>
 <td>per-thread lane datapath signals</td>
 </tr>
+<tr>
+<td><code>perf_*</code></td>
+<td>aggregated performance counters (cycles, instrs, divergence, barrier, icache hits/misses)</td>
+</tr>
 </tbody>
 </table>
 <h2 id="diagram">Diagram<a class="headerlink" href="#diagram" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart TD
-    subgraph SharedControl["Shared per-core control path"]
+    subgraph SharedControl["Warp-slice control path (one per warp)"]
         S["scheduler"] --&gt; F["fetcher"]
+        F --&gt; IC["icache"]
         F --&gt; D["decoder"]
         D --&gt; CTRL["decoded control bundle"]
         S --&gt; STAGE["core_state"]
@@ -2133,9 +2161,9 @@
     STAGE --&gt; P0
     CPC --&gt; F
     CPC --&gt; P0
-    F --&gt; PMEM["program memory interface"]
+    IC --&gt; PMEM["program memory interface (misses only)"]
     L0 --&gt; DMEM["data memory interface for this lane"]
-    NPC --&gt; MERGE["scheduler assumes active lanes converge"]
+    NPC --&gt; MERGE["scheduler reconverges lanes at the minimum PC"]
     MERGE --&gt; S</code></pre>
 <h2 id="how-to-read-this-file">How to read this file<a class="headerlink" href="#how-to-read-this-file" title="Permanent link">&para;</a></h2>
 <p>This file is mostly an <strong>integration file</strong>. It does not invent a lot of new behavior. Instead, it answers these questions:</p>
@@ -2149,38 +2177,42 @@
 <h2 id="behavior-walkthrough">Behavior walkthrough<a class="headerlink" href="#behavior-walkthrough" title="Permanent link">&para;</a></h2>
 <ol>
 <li>The dispatcher gives this core a <code>block_id</code> and <code>thread_count</code>.</li>
-<li>The scheduler starts in charge of the block's instruction lifecycle.</li>
-<li>The fetcher retrieves one instruction from program memory using the shared <code>current_pc</code>.</li>
-<li>The decoder turns that instruction into shared control signals.</li>
-<li>Those shared control signals are broadcast to <strong>all active thread lanes</strong>.</li>
+<li>Each warp slice's scheduler independently runs its warp's instruction lifecycle.</li>
+<li>The warp's fetcher retrieves one instruction through its icache using the warp's <code>current_pc</code>.</li>
+<li>The warp's decoder turns that instruction into control signals.</li>
+<li>Those control signals are broadcast to <strong>the active thread lanes of that warp</strong>.</li>
 <li>Inside each lane:</li>
 <li><code>registers</code> provides operands</li>
 <li><code>alu</code> computes arithmetic or compare results</li>
 <li><code>lsu</code> performs memory access if needed</li>
 <li><code>pc</code> computes that lane's <code>next_pc</code></li>
-<li>The scheduler later decides whether the block is done or moves to the next instruction.</li>
+<li>The warp's scheduler decides whether the warp is done or moves to its next instruction; the core is done when every warp is done.</li>
 </ol>
 <h2 id="shared-path-vs-replicated-path">Shared path vs replicated path<a class="headerlink" href="#shared-path-vs-replicated-path" title="Permanent link">&para;</a></h2>
 <p>This is the most important structural idea in the file.</p>
-<h3 id="shared-per-core-pieces">Shared per-core pieces<a class="headerlink" href="#shared-per-core-pieces" title="Permanent link">&para;</a></h3>
+<h3 id="per-warp-slice-pieces">Per-warp-slice pieces<a class="headerlink" href="#per-warp-slice-pieces" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>fetcher</code></li>
+<li><code>fetcher</code> (with speculative prefetch)</li>
+<li><code>icache</code> (L1 instruction cache)</li>
 <li><code>decoder</code></li>
 <li><code>scheduler</code></li>
-<li>one shared <code>instruction</code></li>
-<li>one shared <code>current_pc</code></li>
-<li>one shared bundle of decoded control signals</li>
+<li>one <code>instruction</code> latch, one <code>current_pc</code>, one decoded control bundle</li>
 </ul>
-<p>These exist only once per core because the tiny-gpu executes one instruction stream per block.</p>
+<p>These exist once per <em>warp</em> because each warp executes its own instruction stream. With one warp per block they are effectively per-core, matching the original design.</p>
 <h3 id="replicated-per-thread-pieces">Replicated per-thread pieces<a class="headerlink" href="#replicated-per-thread-pieces" title="Permanent link">&para;</a></h3>
-<p>Inside the <code>generate</code> loop, every thread lane gets its own:</p>
+<p>Inside the nested <code>generate</code> loops, every thread lane gets its own:</p>
 <ul>
 <li><code>alu</code></li>
 <li><code>lsu</code></li>
 <li><code>registers</code></li>
 <li><code>pc</code></li>
 </ul>
-<p>This is how the same instruction can operate on different thread-local data at the same time.</p>
+<p>This is how the same instruction can operate on different thread-local data at the same time. A lane's control signals come from its <em>owning warp's</em> decoded bundle — no cross-warp muxing is ever needed because lane-to-warp ownership is static (<code>warp = lane / THREADS_PER_WARP</code>).</p>
+<h3 id="per-core-pieces">Per-core pieces<a class="headerlink" href="#per-core-pieces" title="Permanent link">&para;</a></h3>
+<ul>
+<li>the banked <code>shared_memory</code> island (all lanes of all warps share it — that is the point of <code>LDS</code>/<code>STS</code>)</li>
+<li>the cross-warp barrier coordinator: each warp scheduler reports <code>warp_at_barrier</code>; when every live warp of the block has arrived, the coordinator releases them all in the same cycle (retired warps are excluded so a barrier can never deadlock on a warp that already finished)</li>
+</ul>
 <h2 id="the-generate-loop">The <code>generate</code> loop<a class="headerlink" href="#the-generate-loop" title="Permanent link">&para;</a></h2>
 <p>The most important code pattern in this file is:</p>
 <div class="language-sv highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">THREADS_PER_BLOCK</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="k">begin</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">threads</span>
@@ -2207,18 +2239,14 @@
 <li>if this is the final partial block, only the first <code>thread_count</code> lanes are active</li>
 </ul>
 <p>This is how one physical core can still execute a short last block safely.</p>
-<h2 id="the-key-simplification-converged-pc">The key simplification: converged PC<a class="headerlink" href="#the-key-simplification-converged-pc" title="Permanent link">&para;</a></h2>
+<h2 id="the-key-control-model-min-pc-reconvergence-per-warp">The key control model: min-PC reconvergence per warp<a class="headerlink" href="#the-key-control-model-min-pc-reconvergence-per-warp" title="Permanent link">&para;</a></h2>
 <p>Look closely at this structure:</p>
 <ul>
 <li>each lane computes <code>next_pc[i]</code></li>
-<li>but the scheduler later chooses one representative <code>next_pc</code></li>
+<li>the warp's scheduler tracks a per-lane <code>thread_pc</code> and executes the lanes parked at the warp's <em>minimum</em> PC each step</li>
 </ul>
-<p>This reflects one of the repo's biggest simplifications:</p>
-<blockquote>
-<p>all active threads in a block are assumed to converge back to the same PC</p>
-</blockquote>
-<p>Real GPUs must deal with branch divergence much more carefully.</p>
-<p>So <code>core.sv</code> is the place where the repo's simplified SIMD control model becomes most visible.</p>
+<p>This is real branch-divergence support (not the original converged-PC simplification): lanes that branch ahead are frozen and automatically reconverge when the rest catch up. See <a href="../scheduler/"><code>scheduler.md</code></a> for the full model.</p>
+<p>So <code>core.sv</code> is the place where the SIMT execution hierarchy — block → warps → lanes — becomes most visible.</p>
 <h2 id="timing-notes">Timing notes<a class="headerlink" href="#timing-notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Source operand arrays <code>rs[i]</code>, <code>rt[i]</code> are filled by <code>registers.sv</code></li>
@@ -2229,9 +2257,9 @@
 <ul>
 <li>Thinking <code>core.sv</code> contains the actual arithmetic/memory algorithms. Most of those live in submodules.</li>
 <li>Thinking the <code>generate</code> loop is software-style iteration. It is hardware replication.</li>
-<li>Forgetting that this core processes <strong>one block at a time</strong>, not one thread at a time.</li>
+<li>Forgetting that this core processes <strong>one block at a time</strong>, not one thread at a time — but the block's warps <em>do</em> run concurrently.</li>
 <li>Missing the difference between:</li>
-<li>shared control state (<code>core_state</code>, <code>instruction</code>, <code>current_pc</code>)</li>
+<li>per-warp control state (<code>core_state[w]</code>, <code>instruction[w]</code>, <code>current_pc[w]</code>)</li>
 <li>per-thread datapath state (<code>rs[i]</code>, <code>registers</code>, <code>lsu_state[i]</code>, <code>next_pc[i]</code>)</li>
 </ul>
 <h2 id="trace-it-yourself">Trace-it-yourself<a class="headerlink" href="#trace-it-yourself" title="Permanent link">&para;</a></h2>
@@ -2367,7 +2395,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "search.highlight", "search.share", "search.suggest", "content.code.copy", "content.code.annotate", "content.action.edit", "content.action.view", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

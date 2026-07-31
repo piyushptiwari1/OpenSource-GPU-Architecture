@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -757,10 +757,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-no-implemented-cache-module" class="md-nav__link">
+  <a href="#1-no-implemented-cache-module-resolved-see-update-note" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. No implemented cache module
+        1. No implemented cache module (resolved — see update note)
       
     </span>
   </a>
@@ -768,10 +768,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-no-branch-divergence-support" class="md-nav__link">
+  <a href="#2-no-branch-divergence-support-resolved-see-update-note" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. No branch divergence support
+        2. No branch divergence support (resolved — see update note)
       
     </span>
   </a>
@@ -779,10 +779,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting" class="md-nav__link">
+  <a href="#3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting-resolved-see-update-note" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. No pipelining or overlap beyond basic async memory waiting
+        3. No pipelining or overlap beyond basic async memory waiting (resolved — see update note)
       
     </span>
   </a>
@@ -1817,10 +1817,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-no-implemented-cache-module" class="md-nav__link">
+  <a href="#1-no-implemented-cache-module-resolved-see-update-note" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. No implemented cache module
+        1. No implemented cache module (resolved — see update note)
       
     </span>
   </a>
@@ -1828,10 +1828,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-no-branch-divergence-support" class="md-nav__link">
+  <a href="#2-no-branch-divergence-support-resolved-see-update-note" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. No branch divergence support
+        2. No branch divergence support (resolved — see update note)
       
     </span>
   </a>
@@ -1839,10 +1839,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting" class="md-nav__link">
+  <a href="#3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting-resolved-see-update-note" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. No pipelining or overlap beyond basic async memory waiting
+        3. No pipelining or overlap beyond basic async memory waiting (resolved — see update note)
       
     </span>
   </a>
@@ -2021,13 +2021,24 @@
 
 
 <h1 id="risks-limitations-and-open-questions">Risks, Limitations, and Open Questions<a class="headerlink" href="#risks-limitations-and-open-questions" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Update (2026-07):</strong> this report predates the fork's architecture upgrades.
+Items 1–3 below have since been implemented in the verified <code>gpu</code> top:
+a per-warp-slice L1 instruction cache (<code>src/icache.sv</code> + <code>test_icache_e2e.py</code>),
+min-PC branch divergence (<code>src/scheduler.sv</code> + <code>test_divergence_e2e.py</code>),
+speculative-prefetch front-end pipelining (<code>src/fetcher.sv</code>), and multi-warp
+latency hiding (<code>THREADS_PER_WARP</code> + <code>test_warp_scheduling_e2e.py</code>).
+Item 4 (idealized memory timing) remains true for most tests, though
+<code>test_warp_scheduling_e2e.py</code> now models fixed-latency memory. The original
+text is preserved below as a snapshot of the pre-upgrade design.</p>
+</blockquote>
 <h2 id="confirmed-current-limitations">Confirmed current limitations<a class="headerlink" href="#confirmed-current-limitations" title="Permanent link">&para;</a></h2>
 <p>These points are supported by the checked-in source, not merely by the README’s narrative.</p>
-<h3 id="1-no-implemented-cache-module">1. No implemented cache module<a class="headerlink" href="#1-no-implemented-cache-module" title="Permanent link">&para;</a></h3>
+<h3 id="1-no-implemented-cache-module-resolved-see-update-note">1. No implemented cache module (resolved — see update note)<a class="headerlink" href="#1-no-implemented-cache-module-resolved-see-update-note" title="Permanent link">&para;</a></h3>
 <p>The README describes cache as part of the architecture, but the source tree contains no cache module and <code>gpu.sv</code> instantiates no cache layer. This is the single largest source-to-documentation mismatch in the repo.</p>
-<h3 id="2-no-branch-divergence-support">2. No branch divergence support<a class="headerlink" href="#2-no-branch-divergence-support" title="Permanent link">&para;</a></h3>
+<h3 id="2-no-branch-divergence-support-resolved-see-update-note">2. No branch divergence support (resolved — see update note)<a class="headerlink" href="#2-no-branch-divergence-support-resolved-see-update-note" title="Permanent link">&para;</a></h3>
 <p><code>scheduler.sv</code> contains an explicit TODO indicating that branch divergence is not implemented and that the current design assumes next-PC convergence. That keeps the design simple, but it also means kernels that require divergent per-thread control flow are out of scope.</p>
-<h3 id="3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting">3. No pipelining or overlap beyond basic async memory waiting<a class="headerlink" href="#3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting" title="Permanent link">&para;</a></h3>
+<h3 id="3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting-resolved-see-update-note">3. No pipelining or overlap beyond basic async memory waiting (resolved — see update note)<a class="headerlink" href="#3-no-pipelining-or-overlap-beyond-basic-async-memory-waiting-resolved-see-update-note" title="Permanent link">&para;</a></h3>
 <p>The scheduler waits for one instruction lifecycle to finish before progressing to the next instruction. That matches the repository’s educational goal, but it also means throughput-oriented optimizations are intentionally absent.</p>
 <h3 id="4-simple-memory-timing-assumptions-in-tests">4. Simple memory timing assumptions in tests<a class="headerlink" href="#4-simple-memory-timing-assumptions-in-tests" title="Permanent link">&para;</a></h3>
 <p>The Python memory model responds as soon as valid requests are observed. This is good for clarity, but it idealizes memory timing and does not stress the design with realistic latency or backpressure behavior.</p>
@@ -2181,7 +2192,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "search.highlight", "search.share", "search.suggest", "content.code.copy", "content.code.annotate", "content.action.edit", "content.action.view", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

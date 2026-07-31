@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1364,6 +1364,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#divergence-min-pc-reconvergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Divergence (min-PC reconvergence)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#state-machine-idea" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1809,6 +1820,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#divergence-min-pc-reconvergence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Divergence (min-PC reconvergence)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#state-machine-idea" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1899,13 +1921,20 @@
 <h1 id="scheduler-module">Scheduler Module<a class="headerlink" href="#scheduler-module" title="Permanent link">&para;</a></h1>
 <p>Source: <code>src/scheduler.sv</code></p>
 <h2 id="what-this-module-is">What this module is<a class="headerlink" href="#what-this-module-is" title="Permanent link">&para;</a></h2>
-<p><code>scheduler.sv</code> is the core's master stage machine. If you want one file that explains the overall execution rhythm of a block, this is the file.</p>
-<p>DeepWiki's execution-model page describes the six-stage flow <code>FETCH -&gt; DECODE -&gt; REQUEST -&gt; WAIT -&gt; EXECUTE -&gt; UPDATE</code>. This module is exactly where that flow is enforced.</p>
+<p><code>scheduler.sv</code> is the warp's master stage machine. If you want one file that explains the overall execution rhythm of a warp, this is the file.</p>
+<p>DeepWiki's execution-model page describes the six-stage flow <code>FETCH -&gt; DECODE -&gt; REQUEST -&gt; WAIT -&gt; EXECUTE -&gt; UPDATE</code>. This module is exactly where that flow is enforced — with three industry-style extensions:</p>
+<ul>
+<li><strong>branch divergence</strong> via per-lane PCs and min-PC reconvergence,</li>
+<li><strong><code>WAIT</code>-skip</strong> so non-memory instructions bypass the memory-wait stage, and</li>
+<li><strong>block-wide barriers</strong> (<code>BAR</code>) coordinated across all warps of the block.</li>
+</ul>
+<p>Each warp slice of a core instantiates its own scheduler; with the default <code>THREADS_PER_WARP = THREADS_PER_BLOCK</code> there is exactly one per core, which is the classic tiny-gpu shape.</p>
 <h2 id="where-it-sits-in-tiny-gpu">Where it sits in tiny-gpu<a class="headerlink" href="#where-it-sits-in-tiny-gpu" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Upstream:</strong> <code>dispatch.sv</code> provides <code>start</code>; fetcher and LSUs report progress</li>
-<li><strong>Downstream:</strong> all other core-local modules react to <code>core_state</code></li>
-<li><strong>Key idea:</strong> <code>core_state</code> is the shared control clocking rhythm for the whole core</li>
+<li><strong>Upstream:</strong> <code>dispatch.sv</code> provides <code>start</code> (via the core); fetcher and LSUs report progress</li>
+<li><strong>Downstream:</strong> all other warp-local modules react to <code>core_state</code></li>
+<li><strong>Sideways:</strong> exchanges <code>warp_at_barrier</code> / <code>barrier_release</code> with the core's cross-warp barrier coordinator</li>
+<li><strong>Key idea:</strong> <code>core_state</code> is the shared control clocking rhythm for the whole warp</li>
 </ul>
 <h2 id="clockreset-and-when-work-happens">Clock/reset and when work happens<a class="headerlink" href="#clockreset-and-when-work-happens" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1962,32 +1991,36 @@
     IDLE --&gt; FETCH: start
     FETCH --&gt; DECODE: fetcher_state == FETCHED
     DECODE --&gt; REQUEST
-    REQUEST --&gt; WAIT
+    REQUEST --&gt; EXECUTE: no memory access decoded (WAIT-skip)
+    REQUEST --&gt; WAIT: LDR/STR/atomic/LDS/STS
     WAIT --&gt; WAIT: any LSU still REQUESTING or WAITING
     WAIT --&gt; EXECUTE: no LSU still REQUESTING/WAITING
     EXECUTE --&gt; UPDATE
-    UPDATE --&gt; DONE: decoded_ret
-    UPDATE --&gt; FETCH: otherwise current_pc = one next_pc value
+    UPDATE --&gt; DONE: RET retired every valid lane
+    UPDATE --&gt; FETCH: otherwise current_pc = min PC of runnable lanes
     DONE --&gt; DONE</code></pre>
 <h2 id="behavior-walkthrough">Behavior walkthrough<a class="headerlink" href="#behavior-walkthrough" title="Permanent link">&para;</a></h2>
 <ol>
 <li>In <code>IDLE</code>, the scheduler waits for the core to be started on a new block.</li>
-<li><code>FETCH</code> waits until the fetcher reports that the instruction has arrived.</li>
+<li><code>FETCH</code> waits until the fetcher reports that the instruction has arrived (a single cycle when the speculative prefetch guessed right).</li>
 <li><code>DECODE</code> gives the decoder one cycle to produce control signals.</li>
-<li><code>REQUEST</code> lets registers/LSUs launch their work.</li>
+<li><code>REQUEST</code> lets registers/LSUs launch their work. If the decoded instruction touches no memory, the scheduler skips straight to <code>EXECUTE</code>.</li>
 <li><code>WAIT</code> stalls if any LSU still has an in-flight memory operation.</li>
 <li><code>EXECUTE</code> is where ALUs and PC logic do their main calculations.</li>
 <li><code>UPDATE</code> commits results and either:</li>
-<li>ends the block on <code>RET</code></li>
-<li>or advances to the next instruction</li>
+<li>retires the active lanes on <code>RET</code> (the warp finishes once every valid lane has retired)</li>
+<li>parks the active lanes on <code>BAR</code> until every live lane of the <em>block</em> arrives (cross-warp coordination)</li>
+<li>or advances each active lane's PC and reconverges on the new minimum PC</li>
 </ol>
+<h2 id="divergence-min-pc-reconvergence">Divergence (min-PC reconvergence)<a class="headerlink" href="#divergence-min-pc-reconvergence" title="Permanent link">&para;</a></h2>
+<p>Every lane keeps its own <code>thread_pc[i]</code>. Each step, the scheduler selects the <em>minimum</em> PC among runnable lanes and executes exactly the lanes parked there (<code>active_mask</code>). Lanes that branched ahead stay frozen until the rest catch up, at which point they automatically fall back into the same active mask. Correct for structured control flow with no explicit IPDOM stack; <code>perf_divergence_count</code> ticks whenever the active lanes are a strict subset of the live lanes.</p>
 <h2 id="state-machine-idea">State machine idea<a class="headerlink" href="#state-machine-idea" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>IDLE</code>: no active block</li>
 <li><code>FETCH</code>: instruction fetch in progress</li>
 <li><code>DECODE</code>: instruction decode</li>
 <li><code>REQUEST</code>: operand snapshot / memory request launch</li>
-<li><code>WAIT</code>: memory-latency hiding point in this simple design</li>
+<li><code>WAIT</code>: memory-latency wait (skipped entirely by non-memory instructions)</li>
 <li><code>EXECUTE</code>: perform arithmetic/branch logic</li>
 <li><code>UPDATE</code>: commit state updates</li>
 <li><code>DONE</code>: block finished</li>
@@ -1995,27 +2028,26 @@
 <h2 id="timing-notes">Timing notes<a class="headerlink" href="#timing-notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>WAIT</code> is the key stage for understanding asynchronous memory</li>
-<li>The scheduler chooses <code>current_pc &lt;= next_pc[THREADS_PER_BLOCK-1]</code> as a representative value, which encodes the repo's simplifying assumption that active threads reconverge to one PC</li>
-<li><code>done</code> is asserted only when a <code>RET</code> instruction reaches <code>UPDATE</code></li>
+<li><code>current_pc</code> and <code>active_mask</code> are combinational projections of the per-lane state: the minimum PC over lanes that are valid, not retired, and not parked at a barrier</li>
+<li><code>done</code> is asserted only when every valid lane has retired via <code>RET</code></li>
 </ul>
 <p>The Mermaid diagram intentionally shows a self-loop on <code>WAIT</code> because that stage can last multiple cycles when any thread LSU still has an in-flight memory operation.</p>
 <h2 id="common-pitfalls">Common pitfalls<a class="headerlink" href="#common-pitfalls" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Thinking every instruction always spends many cycles in <code>WAIT</code>. Non-memory instructions pass through quickly.</li>
-<li>Missing that <code>decoded_ret</code> is handled in <code>UPDATE</code>, not immediately in <code>DECODE</code>.</li>
-<li>Forgetting the branch-divergence simplification when reading the <code>next_pc[]</code> array.</li>
+<li>Thinking every instruction always spends cycles in <code>WAIT</code>. Non-memory instructions never even enter it.</li>
+<li>Missing that <code>decoded_ret</code> and <code>decoded_barrier</code> are handled in <code>UPDATE</code>, not immediately in <code>DECODE</code>.</li>
+<li>Forgetting that a fully-barrier-parked warp holds in <code>FETCH</code> without fetching until the coordinator releases it — that is what makes cross-warp <code>BAR</code> deadlock-free.</li>
 </ul>
 <h2 id="trace-it-yourself">Trace-it-yourself<a class="headerlink" href="#trace-it-yourself" title="Permanent link">&para;</a></h2>
 <p>For a non-memory <code>ADD</code> instruction, the rough rhythm is:</p>
 <ol>
-<li><code>FETCH</code> gets the instruction</li>
+<li><code>FETCH</code> gets the instruction (1 cycle if the prefetch predicted it)</li>
 <li><code>DECODE</code> produces arithmetic controls</li>
-<li><code>REQUEST</code> snapshots source operands</li>
-<li><code>WAIT</code> exits quickly because no LSU is busy</li>
+<li><code>REQUEST</code> snapshots source operands, then jumps straight to <code>EXECUTE</code> (WAIT-skip)</li>
 <li><code>EXECUTE</code> computes <code>alu_out</code></li>
-<li><code>UPDATE</code> writes the result and advances <code>current_pc</code></li>
+<li><code>UPDATE</code> writes the result and advances each active lane's PC</li>
 </ol>
-<p>For <code>LDR</code>, the difference is that <code>WAIT</code> lasts until the matching LSU finishes.</p>
+<p>For <code>LDR</code>, the difference is that <code>REQUEST</code> transitions into <code>WAIT</code>, which lasts until the matching LSU finishes.</p>
 <h2 id="read-next">Read next<a class="headerlink" href="#read-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../decoder/"><code>decoder.md</code></a></li>
@@ -2138,7 +2170,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "search.highlight", "search.share", "search.suggest", "content.code.copy", "content.code.annotate", "content.action.edit", "content.action.view", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

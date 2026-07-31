@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1899,13 +1899,13 @@
 <h1 id="fetcher-module">Fetcher Module<a class="headerlink" href="#fetcher-module" title="Permanent link">&para;</a></h1>
 <p>Source: <code>src/fetcher.sv</code></p>
 <h2 id="what-this-module-is">What this module is<a class="headerlink" href="#what-this-module-is" title="Permanent link">&para;</a></h2>
-<p><code>fetcher.sv</code> fetches the next instruction from program memory. Each core has one fetcher because all active threads in a core share the same current instruction stream.</p>
-<p>In DeepWiki's execution model, this is the module responsible for the <code>FETCH</code> stage of the core lifecycle.</p>
+<p><code>fetcher.sv</code> fetches the next instruction from program memory (through the per-warp-slice L1 instruction cache, <code>icache.sv</code>). Each warp slice has one fetcher because all active threads in a warp share the same current instruction stream.</p>
+<p>In DeepWiki's execution model, this is the module responsible for the <code>FETCH</code> stage of the core lifecycle — but it is now a <strong>pipelined front-end</strong>: while the warp executes the current instruction, the fetcher speculatively prefetches the predicted next one, so a correct prediction turns the next <code>FETCH</code> stage into a single cycle.</p>
 <h2 id="where-it-sits-in-tiny-gpu">Where it sits in tiny-gpu<a class="headerlink" href="#where-it-sits-in-tiny-gpu" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Upstream:</strong> <code>scheduler.sv</code> provides <code>core_state</code> and <code>current_pc</code></li>
 <li><strong>Downstream:</strong> <code>decoder.sv</code> consumes <code>instruction</code></li>
-<li><strong>Memory path:</strong> program memory request goes through the program-memory controller</li>
+<li><strong>Memory path:</strong> requests go to the warp slice's <code>icache.sv</code>; only cache misses continue to the program-memory controller</li>
 </ul>
 <h2 id="clockreset-and-when-work-happens">Clock/reset and when work happens<a class="headerlink" href="#clockreset-and-when-work-happens" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1954,41 +1954,53 @@
     D -- yes --&gt; E["Latch mem_read_data into instruction&lt;br/&gt;set fetcher_state to FETCHED"]
     E --&gt; F{"core_state == DECODE?"}
     F -- no --&gt; E
-    F -- yes --&gt; G["Return to IDLE for next fetch"]</code></pre>
+    F -- yes --&gt; G{"instruction is RET?"}
+    G -- yes --&gt; A
+    G -- no --&gt; H["SPEC_FETCHING:&lt;br/&gt;prefetch BTFN-predicted PC"]
+    H --&gt; I{"mem_read_ready?"}
+    I -- no --&gt; H
+    I -- yes --&gt; J["SPEC_READY: buffer instruction"]
+    J --&gt; K{"next FETCH:&lt;br/&gt;current_pc == spec_pc?"}
+    K -- "yes (hit)" --&gt; E
+    K -- "no (mispredict)" --&gt; C</code></pre>
 <h2 id="behavior-walkthrough">Behavior walkthrough<a class="headerlink" href="#behavior-walkthrough" title="Permanent link">&para;</a></h2>
 <ol>
 <li>While idle, the fetcher watches for <code>core_state == FETCH</code>.</li>
 <li>When that happens, it raises <code>mem_read_valid</code> and presents <code>current_pc</code> as the address.</li>
-<li>It waits for program memory to respond.</li>
+<li>It waits for the icache to respond (a hit responds in ~1 cycle; a miss pays the program-memory round trip).</li>
 <li>When <code>mem_read_ready</code> arrives, it latches <code>mem_read_data</code> into <code>instruction</code>.</li>
-<li>It then waits for the core to move into <code>DECODE</code>, which marks that this fetch cycle is complete.</li>
+<li>When the core moves into <code>DECODE</code>, the fetch port is free again — so the fetcher immediately starts a <strong>speculative prefetch</strong> of the predicted next PC (static BTFN: a <code>BRnzp</code> with a backward target is predicted taken as a loop edge, everything else predicted <code>PC + 1</code>). It does not speculate past a <code>RET</code>.</li>
+<li>On the next <code>FETCH</code>, a correct prediction is served from the speculation buffer in a single cycle; a mispredict is discarded and refetched as a normal demand fetch.</li>
 </ol>
 <h2 id="state-machine-idea">State machine idea<a class="headerlink" href="#state-machine-idea" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>IDLE</code>: waiting for a new fetch request</li>
-<li><code>FETCHING</code>: request is active, waiting for instruction return</li>
+<li><code>FETCHING</code>: demand request active, waiting for instruction return</li>
 <li><code>FETCHED</code>: instruction has been captured and is ready for decode</li>
+<li><code>SPEC_FETCHING</code>: speculative prefetch in flight while the warp executes</li>
+<li><code>SPEC_READY</code>: predicted instruction buffered, waiting for the next <code>FETCH</code> to confirm or discard it</li>
 </ul>
 <h2 id="timing-notes">Timing notes<a class="headerlink" href="#timing-notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>instruction</code> is stored in a register, so the decoder reads a stable value next stage</li>
 <li>The fetcher and scheduler are coordinated by <code>core_state</code></li>
-<li>This design deliberately keeps fetching simple: one instruction at a time, no instruction cache here</li>
+<li>Speculation is safe because program-memory reads are side-effect free; a wrong guess costs nothing but the refetch it would have needed anyway</li>
 </ul>
 <h2 id="common-pitfalls">Common pitfalls<a class="headerlink" href="#common-pitfalls" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Thinking <code>mem_read_ready</code> means "memory is idle." Here it means the fetch completed.</li>
-<li>Forgetting that the fetcher waits for <code>DECODE</code> before resetting its own state.</li>
-<li>Confusing data memory and program memory paths; this module uses only program memory.</li>
+<li>Forgetting that after <code>FETCHED</code> the fetcher moves into speculation (<code>SPEC_FETCHING</code>), not back to <code>IDLE</code> — <code>IDLE</code> is only re-entered after a <code>RET</code> or a discarded in-flight speculation.</li>
+<li>Confusing data memory and program memory paths; this module uses only program memory (via the icache).</li>
 </ul>
 <h2 id="trace-it-yourself">Trace-it-yourself<a class="headerlink" href="#trace-it-yourself" title="Permanent link">&para;</a></h2>
-<p>Suppose <code>current_pc = 9</code>:</p>
+<p>Suppose <code>current_pc = 9</code> and instruction 9 is not a branch:</p>
 <ol>
 <li>Scheduler enters <code>FETCH</code></li>
 <li>Fetcher outputs <code>mem_read_valid = 1</code>, <code>mem_read_address = 9</code></li>
 <li>Later <code>mem_read_ready = 1</code> and the instruction word returns</li>
 <li>Fetcher stores that instruction and moves to <code>FETCHED</code></li>
-<li>Once scheduler enters <code>DECODE</code>, fetcher returns to <code>IDLE</code></li>
+<li>Once scheduler enters <code>DECODE</code>, the fetcher predicts <code>PC + 1 = 10</code> and starts prefetching it (<code>SPEC_FETCHING</code> → <code>SPEC_READY</code>)</li>
+<li>When the scheduler next enters <code>FETCH</code> with <code>current_pc = 10</code>, the buffered instruction is delivered in one cycle</li>
 </ol>
 <h2 id="read-next">Read next<a class="headerlink" href="#read-next" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2112,7 +2124,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "search.highlight", "search.share", "search.suggest", "content.code.copy", "content.code.annotate", "content.action.edit", "content.action.view", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
