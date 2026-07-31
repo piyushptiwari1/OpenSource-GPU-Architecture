@@ -18,8 +18,10 @@ from .helpers.logger import logger
 #   2. hits + misses == total LDRs issued (32) - every upstream read passes
 #      through the L2 exactly once.
 #   3. hits > 0 - the loop re-reads are served on-chip.
-#   4. External read transactions == l2_miss_count - only misses spend
-#      external bandwidth. This is the point of the cache.
+#   4. External read beats == l2_miss_count * WORDS_PER_LINE - every miss
+#      is exactly one full-line burst; nothing else reads external memory.
+#      (The whole 4-entry table lives in one line, so the 32 loads collapse
+#      to a single 4-beat burst fill.)
 #   5. External write transactions == total STRs (8) - write-through sends
 #      every store to external memory, keeping it authoritative.
 #
@@ -68,6 +70,7 @@ async def test_l2_cache_e2e(dut):
     loop_count = 4
     total_loads = threads * loop_count   # 32 - coalescer cannot collapse any
     total_stores = threads               # 8
+    words_per_line = 4                   # L2 line size (burst length)
 
     await setup(
         dut=dut,
@@ -130,10 +133,11 @@ async def test_l2_cache_e2e(dut):
     # 3. Temporal reuse must be served on-chip.
     assert l2_hits > 0, "loop re-reads should hit in the L2"
 
-    # 4. Only misses reach external memory.
-    assert ext_read_beats == l2_misses, (
-        f"external memory saw {ext_read_beats} reads but the L2 recorded "
-        f"{l2_misses} misses - misses must be the only external read traffic"
+    # 4. Every miss is exactly one full-line burst on the external pins.
+    assert ext_read_beats == l2_misses * words_per_line, (
+        f"external memory saw {ext_read_beats} read beats but the L2 recorded "
+        f"{l2_misses} misses x {words_per_line}-word lines - line bursts must "
+        f"be the only external read traffic"
     )
 
     # 5. Write-through: every store reaches external memory.

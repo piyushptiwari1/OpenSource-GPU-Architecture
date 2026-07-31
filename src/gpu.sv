@@ -176,7 +176,8 @@ module gpu #(
         .ADDR_BITS(DATA_MEM_ADDR_BITS),
         .DATA_BITS(DATA_MEM_DATA_BITS),
         .NUM_CHANNELS(DATA_MEM_NUM_CHANNELS),
-        .LINES_PER_BANK(16)
+        .LINES_PER_BANK(4),
+        .WORDS_PER_LINE(4)
     ) l2_cache_instance (
         .clk(clk),
         .reset(reset),
