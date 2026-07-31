@@ -62,7 +62,9 @@ def format_fetcher_state(fetcher_state: str) -> str:
     fetcher_state_map = {
         "000": "IDLE",
         "001": "FETCHING",
-        "010": "FETCHED"
+        "010": "FETCHED",
+        "011": "SPEC_FETCHING",
+        "100": "SPEC_READY"
     }
     return fetcher_state_map[fetcher_state]
 
@@ -104,39 +106,42 @@ def format_cycle(dut, cycle_id: int, thread_id: Optional[int] = None):
 
         logger.debug(f"\n+--------------------- Core {int(core.i.value)} ---------------------+")
 
-        dir(core.core_instance)
-        instruction = str(core.core_instance.instruction.value)
-        for thread in core.core_instance.threads:
-            if int(thread.i.value) < int(str(core.core_instance.thread_count.value), 2): # if enabled
-                block_idx = int(core.core_instance.block_id.value)
-                block_dim = int(core.core_instance.THREADS_PER_BLOCK.value)
-                thread_idx = int(thread.register_instance.THREAD_ID.value)
-                idx = block_idx * block_dim + thread_idx
+        # The core is organised as warp slices: each warp has its own
+        # front-end (fetcher/decoder/scheduler) and its lanes live under it.
+        for warp in core.core_instance.warps:
+            warp_idx = int(warp.w.value)
+            instruction = str(warp.instruction.value)
+            for thread in warp.threads:
+                lane_idx = int(thread.register_instance.THREAD_ID.value)
+                if lane_idx < int(str(core.core_instance.thread_count.value), 2): # if enabled
+                    block_idx = int(core.core_instance.block_id.value)
+                    block_dim = int(core.core_instance.THREADS_PER_BLOCK.value)
+                    idx = block_idx * block_dim + lane_idx
 
-                rs = int(str(thread.register_instance.rs.value), 2)
-                rt = int(str(thread.register_instance.rt.value), 2)
+                    rs = int(str(thread.register_instance.rs.value), 2)
+                    rt = int(str(thread.register_instance.rt.value), 2)
 
-                reg_input_mux = int(str(core.core_instance.decoded_reg_input_mux.value), 2)
-                alu_out = int(str(thread.alu_instance.alu_out.value), 2)
-                lsu_out = int(str(thread.lsu_instance.lsu_out.value), 2)
-                constant = int(str(core.core_instance.decoded_immediate.value), 2)
+                    reg_input_mux = int(str(warp.decoded_reg_input_mux.value), 2)
+                    alu_out = int(str(thread.alu_instance.alu_out.value), 2)
+                    lsu_out = int(str(thread.lsu_instance.lsu_out.value), 2)
+                    constant = int(str(warp.decoded_immediate.value), 2)
 
-                if (thread_id is None or thread_id == idx):
-                    logger.debug(f"\n+-------- Thread {idx} --------+")
+                    if (thread_id is None or thread_id == idx):
+                        logger.debug(f"\n+-------- Thread {idx} (warp {warp_idx}) --------+")
 
-                    logger.debug("PC:", int(str(core.core_instance.current_pc.value), 2))
-                    logger.debug("Instruction:", format_instruction(instruction))
-                    logger.debug("Core State:", format_core_state(str(core.core_instance.core_state.value)))
-                    logger.debug("Fetcher State:", format_fetcher_state(str(core.core_instance.fetcher_state.value)))
-                    logger.debug("LSU State:", format_lsu_state(str(thread.lsu_instance.lsu_state.value)))
-                    logger.debug("Registers:", format_registers([str(item.value) for item in thread.register_instance.registers]))
-                    logger.debug(f"RS = {rs}, RT = {rt}")
+                        logger.debug("PC:", int(str(warp.current_pc.value), 2))
+                        logger.debug("Instruction:", format_instruction(instruction))
+                        logger.debug("Core State:", format_core_state(str(warp.core_state.value)))
+                        logger.debug("Fetcher State:", format_fetcher_state(str(warp.fetcher_state.value)))
+                        logger.debug("LSU State:", format_lsu_state(str(thread.lsu_instance.lsu_state.value)))
+                        logger.debug("Registers:", format_registers([str(item.value) for item in thread.register_instance.registers]))
+                        logger.debug(f"RS = {rs}, RT = {rt}")
 
-                    if reg_input_mux == 0:
-                        logger.debug("ALU Out:", alu_out)
-                    if reg_input_mux == 1:
-                        logger.debug("LSU Out:", lsu_out)
-                    if reg_input_mux == 2:
-                        logger.debug("Constant:", constant)
+                        if reg_input_mux == 0:
+                            logger.debug("ALU Out:", alu_out)
+                        if reg_input_mux == 1:
+                            logger.debug("LSU Out:", lsu_out)
+                        if reg_input_mux == 2:
+                            logger.debug("Constant:", constant)
 
         logger.debug("Core Done:", str(core.core_instance.done.value))

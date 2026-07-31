@@ -115,16 +115,19 @@ def sample_all(dut) -> None:
     """
     for core in dut.cores:
         inst = core.core_instance
-        state = _STATE_MAP.get(str(inst.core_state.value))
-        if state is None:
-            continue
-        _sample_state(state)
+        # The core is organised as warp slices; sample every warp's FSM and
+        # the instruction it currently holds.
+        for warp in inst.warps:
+            state = _STATE_MAP.get(str(warp.core_state.value))
+            if state is None:
+                continue
+            _sample_state(state)
 
-        if state in _OPCODE_VALID_STATES:
-            opcode = _decode_opcode(str(inst.instruction.value))
-            if opcode is not None:
-                _sample_opcode(opcode)
-                _sample_cross(state, opcode)
+            if state in _OPCODE_VALID_STATES:
+                opcode = _decode_opcode(str(warp.instruction.value))
+                if opcode is not None:
+                    _sample_opcode(opcode)
+                    _sample_cross(state, opcode)
 
 
 # --- Reporting / export ----------------------------------------------------

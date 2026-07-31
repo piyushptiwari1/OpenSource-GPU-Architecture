@@ -61,14 +61,16 @@ async def read_data_byte(dut):
     await send_command(dut, CMD_READ_DATA)
     await send_data(dut, 0)  # Dummy cycle to complete read
     await RisingEdge(dut.clk)  # Extra cycle for output to stabilize
-    return dut.uo_out.value
+    # int() conversion: cocotb 2.x returns a LogicArray, which does not
+    # support bitwise ops against Python ints directly.
+    return int(dut.uo_out.value)
 
 
 async def get_status(dut):
     """Get the GPU status register."""
     await send_command(dut, CMD_STATUS)
     await RisingEdge(dut.clk)
-    return dut.uo_out.value
+    return int(dut.uo_out.value)
 
 
 async def start_gpu(dut):
