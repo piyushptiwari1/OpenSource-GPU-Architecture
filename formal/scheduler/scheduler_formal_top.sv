@@ -21,6 +21,9 @@ module scheduler_formal_top #(
     input wire                                  decoded_mem_write_enable,
     input wire                                  decoded_ret,
     input wire                                  decoded_barrier,
+    // Cross-warp barrier release: driven as free symbolic stimulus so the
+    // proof covers every possible coordinator behaviour.
+    input wire                                  barrier_release,
     input wire [2:0]                            fetcher_state,
     input wire [1:0]                            lsu_state [THREADS_PER_BLOCK-1:0],
     input wire [7:0]                            next_pc   [THREADS_PER_BLOCK-1:0]
@@ -34,6 +37,7 @@ module scheduler_formal_top #(
     wire [31:0]                      perf_barrier_count;
     wire [2:0]                       core_state;
     wire                             done;
+    wire                             warp_at_barrier;
 
     scheduler #(
         .THREADS_PER_BLOCK(THREADS_PER_BLOCK)
@@ -47,6 +51,8 @@ module scheduler_formal_top #(
         .decoded_mem_write_enable(decoded_mem_write_enable),
         .decoded_ret(decoded_ret),
         .decoded_barrier(decoded_barrier),
+        .barrier_release(barrier_release),
+        .warp_at_barrier(warp_at_barrier),
         .fetcher_state(fetcher_state),
         .lsu_state(lsu_state),
         .current_pc(current_pc),

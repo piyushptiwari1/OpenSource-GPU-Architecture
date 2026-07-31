@@ -24,15 +24,19 @@
 // Proven cross-module invariants
 // ------------------------------
 //   fetch_valid_gated   : the core only drives program memory (program_mem_
-//                         read_valid) while its fetcher is actively FETCHING.
+//                         read_valid, now issued by the warp's icache on a
+//                         miss) while its fetcher holds a demand or
+//                         speculative request open (FETCHING/SPEC_FETCHING).
 //   fetch_starts_in_fetch : the fetcher leaves IDLE (begins a fetch) only when
 //                         the scheduler has entered FETCH -- the request edge of
 //                         the scheduler->fetcher handshake.
 //   decode_after_fetched : the scheduler advances FETCH -> DECODE only once the
 //                         fetcher reports FETCHED -- the acknowledge edge of the
 //                         handshake (the heart of the composition proof).
-//   fetcher_clears_on_decode : the fetcher retires FETCHED -> IDLE only when the
-//                         scheduler has reached DECODE -- the handshake teardown.
+//   fetcher_clears_on_decode : the fetcher retires FETCHED (to IDLE after RET,
+//                         or to SPEC_FETCHING to prefetch the predicted next
+//                         instruction) only when the scheduler has reached
+//                         DECODE -- the handshake teardown.
 //   mem_request_gated   : a lane's LSU only drives the data-memory request lines
 //                         while the scheduler is in REQUEST or WAIT, so memory
 //                         traffic is confined to the memory-access window.
@@ -65,9 +69,11 @@ module core_props #(
                      DONE    = 3'b111;
 
     // Fetcher (fetcher_state) encoding.
-    localparam [2:0] F_IDLE     = 3'b000,
-                     F_FETCHING = 3'b001,
-                     F_FETCHED  = 3'b010;
+    localparam [2:0] F_IDLE          = 3'b000,
+                     F_FETCHING      = 3'b001,
+                     F_FETCHED       = 3'b010,
+                     F_SPEC_FETCHING = 3'b011,
+                     F_SPEC_READY    = 3'b100;
 
     // One-cycle history shadows.
     reg        past_valid;
@@ -100,8 +106,12 @@ module core_props #(
 
     always @(posedge clk) begin
         if (past_valid) begin
-            // fetch_valid_gated: program memory is only driven while FETCHING.
-            assert (!program_mem_read_valid || fetcher_state == F_FETCHING);
+            // fetch_valid_gated: upstream program memory is only driven while
+            // the fetcher holds a request open (the icache forwards misses of
+            // demand fetches and speculative prefetches alike).
+            assert (!program_mem_read_valid
+                    || fetcher_state == F_FETCHING
+                    || fetcher_state == F_SPEC_FETCHING);
 
             // mem_request_gated: a lane only drives the data-memory request
             // lines inside the scheduler's memory-access window (REQUEST/WAIT).
@@ -127,9 +137,12 @@ module core_props #(
                     assert (past_fetcher_state == F_FETCHED);
                 end
 
-                // fetcher_clears_on_decode: FETCHED -> IDLE only in DECODE.
+                // fetcher_clears_on_decode: FETCHED is left (for IDLE after a
+                // RET, or for SPEC_FETCHING to start the speculative prefetch)
+                // only while the scheduler is in DECODE.
                 if (past_fetcher_state == F_FETCHED
-                    && fetcher_state == F_IDLE) begin
+                    && (fetcher_state == F_IDLE
+                        || fetcher_state == F_SPEC_FETCHING)) begin
                     assert (past_core_state == DECODE);
                 end
             end

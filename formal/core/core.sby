@@ -7,12 +7,12 @@ smtbmc yices
 
 [script]
 # slang frontend: required for the white-box hierarchical references
-# (u_core.core_state / u_core.fetcher_state) and the unpacked-array ports on
+# (u_core.warps[0].core_state / fetcher_state) and the unpacked-array ports on
 # core.sv and its submodules.
 plugin -i slang
 read_slang --top core_formal_top \
-    core.sv fetcher.sv decoder.sv scheduler.sv alu.sv lsu.sv registers.sv \
-    pc.sv shared_memory.sv core_props.sv core_formal_top.sv
+    core.sv fetcher.sv icache.sv decoder.sv scheduler.sv alu.sv lsu.sv \
+    registers.sv pc.sv shared_memory.sv core_props.sv core_formal_top.sv
 # Datapath abstraction: the cross-module CONTROL handshakes proven here do not
 # depend on computed data values, so black-box the pure-datapath modules (ALU,
 # register file, shared-memory island). Their outputs become free symbolic
@@ -26,6 +26,7 @@ prep -top core_formal_top
 [files]
 ../../src/core.sv
 ../../src/fetcher.sv
+../../src/icache.sv
 ../../src/decoder.sv
 ../../src/scheduler.sv
 ../../src/alu.sv

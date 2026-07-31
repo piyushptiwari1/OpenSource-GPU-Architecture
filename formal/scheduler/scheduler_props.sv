@@ -90,15 +90,22 @@ module scheduler_props #(
             if (!past_reset) begin
                 case (past_core_state)
                     IDLE: begin
-                        // start_gate: stay IDLE unless start was asserted.
+                        // start_gate: stay IDLE unless start was asserted. An
+                        // empty warp (thread_count == 0, possible when a small
+                        // block leaves a trailing warp without lanes) retires
+                        // straight to DONE.
                         if (!past_start)
                             assert (core_state == IDLE);
                         else
-                            assert (core_state == IDLE || core_state == FETCH);
+                            assert (core_state == IDLE || core_state == FETCH
+                                    || core_state == DONE);
                     end
                     FETCH:   assert (core_state == FETCH || core_state == DECODE);
                     DECODE:  assert (core_state == REQUEST);
-                    REQUEST: assert (core_state == WAIT);
+                    // Non-memory instructions skip WAIT and issue straight to
+                    // EXECUTE (front-end optimization); memory instructions
+                    // still pass through WAIT.
+                    REQUEST: assert (core_state == WAIT || core_state == EXECUTE);
                     WAIT:    assert (core_state == WAIT || core_state == EXECUTE);
                     EXECUTE: assert (core_state == UPDATE);
                     UPDATE:  assert (core_state == FETCH || core_state == DONE);
