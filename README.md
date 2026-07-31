@@ -130,6 +130,10 @@ Each warp slice in every core owns a direct-mapped **L1 instruction cache** (`ic
 
 Cache effectiveness is observable at the top level through the `perf_icache_hit_count` / `perf_icache_miss_count` counters, and `test/test_icache_e2e.py` asserts the architectural invariant that external program-memory transactions equal cache misses (matmul: 41 instructions retired with only 28 external fetches).
 
+### L2 Data Cache
+
+On the data side, a **banked write-through L2 cache** (`l2_cache.sv`) sits between the data memory controller and external memory — one bank per memory channel. Read hits are served on-chip; only cold misses spend external read bandwidth (`test_l2_cache_e2e.py`: 32 kernel loads become just 4 external reads, and a line filled by one core serves the other core's reuse). Writes are **write-through**, so external memory always holds authoritative data, and every completed write **snoops the peer banks** and invalidates their stale copies — the classic write-through invalidation protocol. Atomics remain correct because the controller's per-address locks sit upstream of the cache. Effectiveness is visible through `perf_l2_hit_count` / `perf_l2_miss_count`.
+
 ## Core
 
 Each core has a number of compute resources, often built around a certain number of threads it can support. In order to maximize parallelization, these resources need to be managed optimally to maximize resource utilization.
@@ -396,6 +400,7 @@ Modern GPUs implement many features beyond the minimal learning core. This fork 
 | Feature | Status | RTL | Proven by |
 |---|---|---|---|
 | L1 instruction cache (per warp slice) | ✅ implemented | `icache.sv` | `test_icache_e2e.py` |
+| L2 data cache (banked, write-through, snooping) | ✅ implemented | `l2_cache.sv` | `test_l2_cache_e2e.py` |
 | Front-end pipelining (speculative prefetch, BTFN) | ✅ implemented | `fetcher.sv` | `test_matmul.py` (−29% cycles), full sweep |
 | `WAIT`-skip for non-memory instructions | ✅ implemented | `scheduler.sv` | full sweep |
 | Warp scheduling (multi-warp cores, latency hiding) | ✅ implemented | `core.sv` + `scheduler.sv` | `test_warp_scheduling_e2e.py` (−25% cycles) |
@@ -405,7 +410,6 @@ Modern GPUs implement many features beyond the minimal learning core. This fork 
 | Barriers (block-wide, cross-warp) | ✅ implemented | `scheduler.sv` + `core.sv` | `test_barrier_e2e.py`, `test_warp_scheduling_e2e.py` |
 | Atomics (`ATOMICADD` / `ATOMICCAS`) | ✅ implemented | `lsu.sv` + `controller.sv` | `test_atomic_add.py`, `test_atomic_cas.py` |
 | Graphics kernel (SIMT rasterizer) | ✅ implemented | ISA kernel | `test_graphics_e2e.py` |
-| Data cache, multi-level hierarchy | roadmap | — | — |
 | Address-range (burst) coalescing | roadmap | — | — |
 
 ### Multi-layered Cache & Shared Memory
@@ -460,7 +464,7 @@ Roadmap status — items from the original tiny-gpu wishlist that this fork has 
 - [x] Optimize control flow and use of registers to improve cycle time — `WAIT`-skip + single-cycle predicted fetch (matmul −29%, matadd −13%)
 - [x] Write a basic graphics kernel — SIMT edge-function rasterizer, `test_graphics_e2e.py`
 - [x] Warp scheduling — multi-warp cores with cross-warp barriers (`THREADS_PER_WARP` parameter)
-- [ ] Data cache (L1D) + multi-level cache hierarchy
+- [x] Data cache — banked write-through snooping L2 between the memory controller and external memory (`l2_cache.sv`; 32 loads → 4 external reads in `test_l2_cache_e2e.py`)
 - [ ] Address-range (burst) coalescing for strided access patterns
 - [ ] Scoreboarded issue pipeline (multiple instructions in flight per warp)
 - [ ] Dedicated graphics hardware path (the `rasterizer.sv` / `framebuffer.sv` SoC modules are not yet wired into the verified `gpu` top)

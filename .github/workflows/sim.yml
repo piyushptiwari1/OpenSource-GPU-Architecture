@@ -142,6 +142,7 @@ jobs:
           - perf_counters_e2e
           - coalesce_broadcast_e2e
           - icache_e2e
+          - l2_cache_e2e
           - warp_scheduling_e2e
           - graphics_e2e
           - functional_coverage

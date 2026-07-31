@@ -61,7 +61,11 @@ module gpu #(
     output reg [31:0] perf_coalesced_count,
     // L1 instruction cache effectiveness, aggregated (summed) across all cores.
     output reg [31:0] perf_icache_hit_count,
-    output reg [31:0] perf_icache_miss_count
+    output reg [31:0] perf_icache_miss_count,
+    // L2 data cache effectiveness (banked cache between the data memory
+    // controller and external memory; read hits stay on-chip).
+    output wire [31:0] perf_l2_hit_count,
+    output wire [31:0] perf_l2_miss_count
 );
     // Control
     wire [7:0] thread_count;
@@ -103,6 +107,19 @@ module gpu #(
     // Per-core L1 instruction-cache hit/miss counts (summed over warps).
     wire [31:0] core_icache_hit_count [NUM_CORES-1:0];
     wire [31:0] core_icache_miss_count [NUM_CORES-1:0];
+
+    // Controller <> L2 data cache channel wires. The data memory controller's
+    // memory-side ports no longer reach the external pins directly; the
+    // banked write-through L2 sits in between and forwards only misses
+    // (reads) / write-throughs (writes) to external memory.
+    wire [DATA_MEM_NUM_CHANNELS-1:0] l2_up_read_valid;
+    wire [DATA_MEM_ADDR_BITS-1:0] l2_up_read_address [DATA_MEM_NUM_CHANNELS-1:0];
+    wire [DATA_MEM_NUM_CHANNELS-1:0] l2_up_read_ready;
+    wire [DATA_MEM_DATA_BITS-1:0] l2_up_read_data [DATA_MEM_NUM_CHANNELS-1:0];
+    wire [DATA_MEM_NUM_CHANNELS-1:0] l2_up_write_valid;
+    wire [DATA_MEM_ADDR_BITS-1:0] l2_up_write_address [DATA_MEM_NUM_CHANNELS-1:0];
+    wire [DATA_MEM_DATA_BITS-1:0] l2_up_write_data [DATA_MEM_NUM_CHANNELS-1:0];
+    wire [DATA_MEM_NUM_CHANNELS-1:0] l2_up_write_ready;
     
     initial begin
         $dumpfile("gpu.vcd");
@@ -139,6 +156,40 @@ module gpu #(
         .consumer_write_ready(lsu_write_ready),
         .consumer_atomic(lsu_atomic),
 
+        .mem_read_valid(l2_up_read_valid),
+        .mem_read_address(l2_up_read_address),
+        .mem_read_ready(l2_up_read_ready),
+        .mem_read_data(l2_up_read_data),
+        .mem_write_valid(l2_up_write_valid),
+        .mem_write_address(l2_up_write_address),
+        .mem_write_data(l2_up_write_data),
+        .mem_write_ready(l2_up_write_ready)
+    );
+
+    // L2 Data Cache (banked write-through with snoop-invalidate)
+    // > One bank per data-memory channel; read hits are served on-chip and
+    //   only misses / write-throughs reach the external data memory pins.
+    // > Write-through keeps external memory authoritative, so kernel results
+    //   remain externally inspectable and the controller's atomic address
+    //   locks (which sit upstream of this cache) stay correct.
+    l2_cache #(
+        .ADDR_BITS(DATA_MEM_ADDR_BITS),
+        .DATA_BITS(DATA_MEM_DATA_BITS),
+        .NUM_CHANNELS(DATA_MEM_NUM_CHANNELS),
+        .LINES_PER_BANK(16)
+    ) l2_cache_instance (
+        .clk(clk),
+        .reset(reset),
+
+        .up_read_valid(l2_up_read_valid),
+        .up_read_address(l2_up_read_address),
+        .up_read_ready(l2_up_read_ready),
+        .up_read_data(l2_up_read_data),
+        .up_write_valid(l2_up_write_valid),
+        .up_write_address(l2_up_write_address),
+        .up_write_data(l2_up_write_data),
+        .up_write_ready(l2_up_write_ready),
+
         .mem_read_valid(data_mem_read_valid),
         .mem_read_address(data_mem_read_address),
         .mem_read_ready(data_mem_read_ready),
@@ -146,7 +197,10 @@ module gpu #(
         .mem_write_valid(data_mem_write_valid),
         .mem_write_address(data_mem_write_address),
         .mem_write_data(data_mem_write_data),
-        .mem_write_ready(data_mem_write_ready)
+        .mem_write_ready(data_mem_write_ready),
+
+        .l2_hit_count(perf_l2_hit_count),
+        .l2_miss_count(perf_l2_miss_count)
     );
 
     // Program Memory Controller

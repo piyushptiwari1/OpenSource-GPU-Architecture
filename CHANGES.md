@@ -76,6 +76,7 @@ the full sweep.
 | Multi-warp SIMT cores: block partitioned into warp slices (own fetcher + icache + decoder + scheduler), independent per-warp FSMs hide each other's memory latency | `src/core.sv` (`THREADS_PER_WARP` parameter, default = whole block) | `test/test_warp_scheduling_e2e.py`: latency-bound kernel 868 → 647 cycles (−25%), 310 measured overlap cycles |
 | Cross-warp block barrier coordinator (BAR synchronises all live warps; retired warps excluded, deadlock-free) | `src/core.sv` + `src/scheduler.sv` | `test/test_warp_scheduling_e2e.py`, `test/test_barrier_e2e.py` |
 | Graphics: SIMT edge-function rasterizer kernel rendering a triangle into a framebuffer region with per-pixel divergence | ISA kernel (no new RTL) | `test/test_graphics_e2e.py` |
+| L2 data cache: banked write-through cache with snoop-invalidate coherence between the data memory controller and external memory; only misses spend external read bandwidth, atomics stay locked upstream | `src/l2_cache.sv`, wired in `src/gpu.sv` | `test/test_l2_cache_e2e.py`: 32 loads → 4 external reads (87.5% hit rate), write-through verified beat-for-beat |
 | Tiny Tapeout 7 adapter test target in the main cocotb v2 flow | `src/tt_um_tiny_gpu.sv` (from PR #55) | `make test_tt_adapter` (5 subtests) |
 | Top-level observability: `perf_icache_hit/miss_count` counters joining the existing cycle/instr/divergence/barrier/coalesce counters | `src/gpu.sv` | perf/e2e tests |
 
