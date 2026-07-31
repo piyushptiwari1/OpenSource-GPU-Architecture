@@ -30,7 +30,12 @@ module icache #(
     output reg mem_read_valid,
     output reg [ADDR_BITS-1:0] mem_read_address,
     input wire mem_read_ready,
-    input wire [DATA_BITS-1:0] mem_read_data
+    input wire [DATA_BITS-1:0] mem_read_data,
+
+    // Performance counters (monotonic; cleared only on reset). Exposed so the
+    // GPU top can aggregate instruction-cache effectiveness across cores.
+    output reg [15:0] hit_count,
+    output reg [15:0] miss_count
 );
     // State machine states
     localparam IDLE = 2'b00;
@@ -60,10 +65,6 @@ module icache #(
     // Loop variable
     integer i;
 
-    // Performance counters (optional - can be removed for synthesis)
-    reg [15:0] hit_count;
-    reg [15:0] miss_count;
-
     always @(posedge clk) begin
         if (reset) begin
             cache_state <= IDLE;
@@ -90,7 +91,11 @@ module icache #(
                     read_ready <= 0;
                     cache_hit_out <= 0;
 
-                    if (read_request) begin
+                    // The fetcher holds `read_request` high until it samples
+                    // `read_ready`; the `!read_ready` guard stops the cache
+                    // from double-serving (and double-counting) the same
+                    // request on the cycle the fetcher is latching the data.
+                    if (read_request && !read_ready) begin
                         if (cache_hit) begin
                             // Cache hit - return instruction immediately
                             read_data <= cache_data[index];

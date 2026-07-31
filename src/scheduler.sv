@@ -47,6 +47,18 @@ module scheduler #(
     // reached a barrier and are held until every live lane arrives.
     input decoded_barrier,
 
+    // Cross-warp barrier coordination. A BAR synchronises the whole *block*,
+    // which may span several warps, each run by its own scheduler instance.
+    // `warp_at_barrier` is asserted while every live lane of THIS warp has
+    // arrived at the barrier (or is arriving this cycle); the core-level
+    // coordinator asserts `barrier_release` once every warp in the block is
+    // at the barrier (or fully retired), releasing all parked lanes past the
+    // BAR in the same cycle. With one warp per block the coordinator reduces
+    // to `barrier_release = warp_at_barrier`, which preserves the original
+    // single-warp behaviour bit-for-bit.
+    input wire barrier_release,
+    output wire warp_at_barrier,
+
     // Memory Access State
     input [2:0] fetcher_state,
     input [1:0] lsu_state [THREADS_PER_BLOCK-1:0],
@@ -139,6 +151,14 @@ module scheduler #(
         active_mask = next_active_mask;
     end
 
+    // Warp-level barrier arrival, exported to the core's barrier coordinator:
+    // either every live lane is already parked at the BAR (cross-warp hold),
+    // or the lanes arriving in this UPDATE complete the warp's arrival.
+    assign warp_at_barrier = (live_mask != '0) && (
+        ((thread_at_barrier & live_mask) == live_mask)
+        || (core_state == UPDATE && decoded_barrier
+            && ((live_mask & ~(thread_at_barrier | active_mask)) == '0)));
+
     integer m;
     always @(posedge clk) begin 
         if (reset) begin
@@ -163,14 +183,37 @@ module scheduler #(
                 IDLE: begin
                     // Here after reset (before kernel is launched, or after previous block has been processed)
                     if (start) begin 
-                        // current_pc / active_mask are already driven
-                        // combinationally; just begin fetching.
-                        core_state <= FETCH;
+                        if (valid_mask == '0) begin
+                            // Empty warp: the block is smaller than a full
+                            // complement of warps, and no lane in this warp is
+                            // valid. Retire immediately so the core's done/
+                            // barrier logic never waits on lanes that do not
+                            // exist.
+                            done <= 1;
+                            core_state <= DONE;
+                        end else begin
+                            // current_pc / active_mask are already driven
+                            // combinationally; just begin fetching.
+                            core_state <= FETCH;
+                        end
                     end
                 end
                 FETCH: begin 
-                    // Move on once fetcher_state = FETCHED
-                    if (fetcher_state == 3'b010) begin 
+                    if (active_mask == '0) begin
+                        // Cross-warp barrier hold: every live lane of this warp
+                        // is parked at a BAR waiting for the other warps of the
+                        // block. Release them together once the coordinator
+                        // signals that the whole block has arrived.
+                        if (barrier_release && (thread_at_barrier & live_mask) != '0) begin
+                            for (m = 0; m < THREADS_PER_BLOCK; m = m + 1) begin
+                                if (thread_at_barrier[m] && live_mask[m]) begin
+                                    thread_pc[m] <= thread_pc[m] + 1;
+                                end
+                            end
+                            thread_at_barrier <= '0;
+                        end
+                    end else if (fetcher_state == 3'b010) begin 
+                        // Move on once fetcher_state = FETCHED
                         core_state <= DECODE;
                     end
                 end
@@ -179,8 +222,16 @@ module scheduler #(
                     core_state <= REQUEST;
                 end
                 REQUEST: begin 
-                    // Request is synchronous so we move on after one cycle
-                    core_state <= WAIT;
+                    // Request is synchronous so we move on after one cycle.
+                    // Only memory instructions (LDR/STR/LDS/STS/atomics) have
+                    // LSU work to wait for; everything else skips WAIT and
+                    // goes straight to EXECUTE, saving a cycle per
+                    // non-memory instruction (issue: control-flow optimization).
+                    if (decoded_mem_read_enable || decoded_mem_write_enable) begin
+                        core_state <= WAIT;
+                    end else begin
+                        core_state <= EXECUTE;
+                    end
                 end
                 WAIT: begin
                     // Wait for all LSUs to finish their request before continuing
@@ -230,17 +281,29 @@ module scheduler #(
                         // The active lanes have reached a BAR. Park them at the
                         // barrier; runnable lanes that are still behind keep
                         // executing (they are now the new minimum PC) until they
-                        // too arrive. Once every live lane has arrived, release
-                        // the whole block together past the barrier.
+                        // too arrive. Once every live lane of this warp has
+                        // arrived, the warp signals `warp_at_barrier`; only when
+                        // the block-level coordinator confirms every OTHER warp
+                        // has arrived too (`barrier_release`) is the whole block
+                        // stepped past the BAR in lockstep.
                         if ((live_mask & ~(thread_at_barrier | active_mask)) == '0) begin
-                            // Last arrivals complete the barrier: release all
-                            // parked lanes and step them past the BAR in lockstep.
-                            for (m = 0; m < THREADS_PER_BLOCK; m = m + 1) begin
-                                if ((thread_at_barrier[m] | active_mask[m]) && live_mask[m]) begin
-                                    thread_pc[m] <= thread_pc[m] + 1;
+                            // This warp's last arrivals are here.
+                            if (barrier_release) begin
+                                // Whole block arrived: release every parked lane
+                                // and step them past the BAR together.
+                                for (m = 0; m < THREADS_PER_BLOCK; m = m + 1) begin
+                                    if ((thread_at_barrier[m] | active_mask[m]) && live_mask[m]) begin
+                                        thread_pc[m] <= thread_pc[m] + 1;
+                                    end
                                 end
+                                thread_at_barrier <= '0;
+                            end else begin
+                                // Other warps of the block are still on their
+                                // way: park the arrivals and hold in FETCH with
+                                // an empty active mask (cross-warp stall).
+                                thread_at_barrier <= thread_at_barrier | active_mask;
+                                perf_barrier_count <= perf_barrier_count + 1;
                             end
-                            thread_at_barrier <= '0;
                         end else begin
                             // Hold the lanes that just arrived; do not advance
                             // their PC. Lanes still behind will run next.

@@ -8,6 +8,22 @@ LIBPYTHON_DIR=$(shell dirname $(shell cocotb-config --libpython))
 TOPLEVEL := gpu
 TIMESTAMP := $(shell date +%Y%m%d%H%M%S)
 
+# Tiny Tapeout 7 adapter test (README roadmap item). The adapter is a
+# self-contained serial-protocol wrapper (src/tt_um_tiny_gpu.sv) with its own
+# small on-chip memories, so it builds independently of the gpu top. This
+# explicit rule takes precedence over the test_% pattern rule below.
+test_tt_adapter:
+	mkdir -p build test/runs
+	$(SV2V) -w build/tt_um_tiny_gpu.v src/tt_um_tiny_gpu.sv
+	echo '`timescale 1ns/1ns' > build/temp_tt.v
+	cat build/tt_um_tiny_gpu.v >> build/temp_tt.v
+	mv build/temp_tt.v build/tt_um_tiny_gpu.v
+	iverilog -o build/tt_sim.vvp -s tt_um_tiny_gpu -g2012 build/tt_um_tiny_gpu.v
+	LD_LIBRARY_PATH="$(LIBPYTHON_DIR):$$LD_LIBRARY_PATH" \
+	COCOTB_TEST_MODULES=test.test_tt_adapter \
+	MODULE=test.test_tt_adapter \
+	vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/tt_sim.vvp -fst > test/runs/test_tt_adapter_$(TIMESTAMP).out
+
 # Default test target: builds with iverilog, dumps waveform to VCD,
 # logs cocotb output to a timestamped file under test/runs/.
 test_%:
@@ -42,6 +58,7 @@ GPU_TOP_SRCS := \
     src/dispatch.sv    \
     src/core.sv        \
     src/fetcher.sv     \
+    src/icache.sv      \
     src/decoder.sv     \
     src/scheduler.sv   \
     src/lsu.sv         \
@@ -74,6 +91,24 @@ iverilog_dump_%.sv:
 # Alternate cocotb-driven flow producing FST waveforms via Makefile.cocotb.mk
 test.test_%: compile
 	make -f Makefile.cocotb.mk MODULE=$@
+
+# Multi-warp configuration test. cocotb's VPI layer segfaults on iverilog
+# parameter overrides (both -P and defparam), so this target rewrites the
+# THREADS_PER_WARP *default* in the translated Verilog instead: each 4-thread
+# block then runs as 2 independent warps of 2 lanes (true warp scheduling).
+# RTL and testbench are otherwise identical to the standard flow.
+test_warp_scheduling_e2e:
+	mkdir -p build
+	make compile
+	sed 's/parameter THREADS_PER_WARP = THREADS_PER_BLOCK;/parameter THREADS_PER_WARP = 2;/' build/gpu.v > build/gpu_mw.v
+	make iverilog_dump_warp_scheduling_e2e.sv
+	iverilog -o build/sim.vvp -s gpu -g2012 build/gpu_mw.v -s iverilog_dump_warp_scheduling_e2e iverilog_dump_warp_scheduling_e2e.sv
+	cd test && mkdir -p runs
+	cd ..
+	LD_LIBRARY_PATH="$(LIBPYTHON_DIR):$$LD_LIBRARY_PATH" \
+	COCOTB_TEST_MODULES=test.test_warp_scheduling_e2e \
+	MODULE=test.test_warp_scheduling_e2e \
+	vvp -M $$(cocotb-config --lib-dir) -m libcocotbvpi_icarus build/sim.vvp -fst > test/runs/test_warp_scheduling_e2e_$(TIMESTAMP).out
 
 .SECONDEXPANSION:
 

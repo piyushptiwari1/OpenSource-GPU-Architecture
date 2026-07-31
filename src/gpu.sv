@@ -15,7 +15,13 @@ module gpu #(
     parameter PROGRAM_MEM_DATA_BITS = 16,    // Number of bits in program memory value (16 bit instruction)
     parameter PROGRAM_MEM_NUM_CHANNELS = 1,  // Number of concurrent channels for sending requests to program memory
     parameter NUM_CORES = 2,                 // Number of cores to include in this GPU
-    parameter THREADS_PER_BLOCK = 4          // Number of threads to handle per block (determines the compute resources of each core)
+    parameter THREADS_PER_BLOCK = 4,         // Number of threads to handle per block (determines the compute resources of each core)
+    // Number of lanes that execute in lockstep under one warp scheduler.
+    // The default (whole block = one warp) preserves the classic single-warp
+    // behaviour; smaller values split each block into multiple independent
+    // warps that hide each other's memory latency (real-GPU warp scheduling).
+    // Must divide THREADS_PER_BLOCK.
+    parameter THREADS_PER_WARP = THREADS_PER_BLOCK
 ) (
     input wire clk,
     input wire reset,
@@ -52,7 +58,10 @@ module gpu #(
     output reg [31:0] perf_barrier_count,
     // Total memory read requests eliminated by warp-level coalescing (summed
     // across all cores). A value of 0 means no two lanes shared a load address.
-    output reg [31:0] perf_coalesced_count
+    output reg [31:0] perf_coalesced_count,
+    // L1 instruction cache effectiveness, aggregated (summed) across all cores.
+    output reg [31:0] perf_icache_hit_count,
+    output reg [31:0] perf_icache_miss_count
 );
     // Control
     wire [7:0] thread_count;
@@ -76,12 +85,13 @@ module gpu #(
     reg [NUM_LSUS-1:0] lsu_write_ready;
     wire [NUM_LSUS-1:0] lsu_atomic;
 
-    // Fetcher <> Program Memory Controller Channels
-    localparam NUM_FETCHERS = NUM_CORES;
-    reg [NUM_FETCHERS-1:0] fetcher_read_valid;
-    reg [PROGRAM_MEM_ADDR_BITS-1:0] fetcher_read_address [NUM_FETCHERS-1:0];
-    reg [NUM_FETCHERS-1:0] fetcher_read_ready;
-    reg [PROGRAM_MEM_DATA_BITS-1:0] fetcher_read_data [NUM_FETCHERS-1:0];
+    // Fetcher <> Program Memory Controller Channels (one per warp per core)
+    localparam WARPS_PER_CORE = THREADS_PER_BLOCK / THREADS_PER_WARP;
+    localparam NUM_FETCHERS = NUM_CORES * WARPS_PER_CORE;
+    wire [NUM_FETCHERS-1:0] fetcher_read_valid;
+    wire [PROGRAM_MEM_ADDR_BITS-1:0] fetcher_read_address [NUM_FETCHERS-1:0];
+    wire [NUM_FETCHERS-1:0] fetcher_read_ready;
+    wire [PROGRAM_MEM_DATA_BITS-1:0] fetcher_read_data [NUM_FETCHERS-1:0];
 
     // Per-core performance counters (aggregated below into the top-level ports).
     wire [31:0] core_perf_cycle_count [NUM_CORES-1:0];
@@ -90,6 +100,9 @@ module gpu #(
     wire [31:0] core_perf_barrier_count [NUM_CORES-1:0];
     // Per-core count of memory read requests eliminated by warp coalescing.
     wire [31:0] core_coalesced_total [NUM_CORES-1:0];
+    // Per-core L1 instruction-cache hit/miss counts (summed over warps).
+    wire [31:0] core_icache_hit_count [NUM_CORES-1:0];
+    wire [31:0] core_icache_miss_count [NUM_CORES-1:0];
     
     initial begin
         $dumpfile("gpu.vcd");
@@ -283,13 +296,31 @@ module gpu #(
             end
             assign core_coalesced_total[i] = core_coalesced_count;
 
+            // ---- Per-warp program-memory channels --------------------------
+            // Each warp slice inside the core owns an independent fetch
+            // channel (fetcher + icache); map warp w of core i onto global
+            // program-memory consumer i * WARPS_PER_CORE + w.
+            wire [WARPS_PER_CORE-1:0] core_prog_read_valid;
+            wire [PROGRAM_MEM_ADDR_BITS-1:0] core_prog_read_address [WARPS_PER_CORE-1:0];
+            wire [WARPS_PER_CORE-1:0] core_prog_read_ready;
+            wire [PROGRAM_MEM_DATA_BITS-1:0] core_prog_read_data [WARPS_PER_CORE-1:0];
+
+            genvar wch;
+            for (wch = 0; wch < WARPS_PER_CORE; wch = wch + 1) begin : prog_channels
+                assign fetcher_read_valid[i * WARPS_PER_CORE + wch] = core_prog_read_valid[wch];
+                assign fetcher_read_address[i * WARPS_PER_CORE + wch] = core_prog_read_address[wch];
+                assign core_prog_read_ready[wch] = fetcher_read_ready[i * WARPS_PER_CORE + wch];
+                assign core_prog_read_data[wch] = fetcher_read_data[i * WARPS_PER_CORE + wch];
+            end
+
             // Compute Core
             core #(
                 .DATA_MEM_ADDR_BITS(DATA_MEM_ADDR_BITS),
                 .DATA_MEM_DATA_BITS(DATA_MEM_DATA_BITS),
                 .PROGRAM_MEM_ADDR_BITS(PROGRAM_MEM_ADDR_BITS),
                 .PROGRAM_MEM_DATA_BITS(PROGRAM_MEM_DATA_BITS),
-                .THREADS_PER_BLOCK(THREADS_PER_BLOCK)
+                .THREADS_PER_BLOCK(THREADS_PER_BLOCK),
+                .THREADS_PER_WARP(THREADS_PER_WARP)
             ) core_instance (
                 .clk(clk),
                 .reset(core_reset[i]),
@@ -299,10 +330,10 @@ module gpu #(
                 .block_id(core_block_id[i]),
                 .thread_count(core_thread_count[i]),
                 
-                .program_mem_read_valid(fetcher_read_valid[i]),
-                .program_mem_read_address(fetcher_read_address[i]),
-                .program_mem_read_ready(fetcher_read_ready[i]),
-                .program_mem_read_data(fetcher_read_data[i]),
+                .program_mem_read_valid(core_prog_read_valid),
+                .program_mem_read_address(core_prog_read_address),
+                .program_mem_read_ready(core_prog_read_ready),
+                .program_mem_read_data(core_prog_read_data),
 
                 .data_mem_read_valid(core_lsu_read_valid),
                 .data_mem_read_address(core_lsu_read_address),
@@ -317,7 +348,9 @@ module gpu #(
                 .perf_cycle_count(core_perf_cycle_count[i]),
                 .perf_instr_count(core_perf_instr_count[i]),
                 .perf_divergence_count(core_perf_divergence_count[i]),
-                .perf_barrier_count(core_perf_barrier_count[i])
+                .perf_barrier_count(core_perf_barrier_count[i]),
+                .perf_icache_hit_count(core_icache_hit_count[i]),
+                .perf_icache_miss_count(core_icache_miss_count[i])
             );
         end
     endgenerate
@@ -327,6 +360,7 @@ module gpu #(
     // reliable @(*) sensitivity list over unpacked-array element reads.
     integer c;
     reg [31:0] sum_cycle, sum_instr, sum_diverge, sum_barrier, sum_coalesced;
+    reg [31:0] sum_icache_hit, sum_icache_miss;
     always @(posedge clk) begin
         if (reset) begin
             perf_cycle_count <= 32'b0;
@@ -334,24 +368,32 @@ module gpu #(
             perf_divergence_count <= 32'b0;
             perf_barrier_count <= 32'b0;
             perf_coalesced_count <= 32'b0;
+            perf_icache_hit_count <= 32'b0;
+            perf_icache_miss_count <= 32'b0;
         end else begin
             sum_cycle = 32'b0;
             sum_instr = 32'b0;
             sum_diverge = 32'b0;
             sum_barrier = 32'b0;
             sum_coalesced = 32'b0;
+            sum_icache_hit = 32'b0;
+            sum_icache_miss = 32'b0;
             for (c = 0; c < NUM_CORES; c = c + 1) begin
                 sum_cycle = sum_cycle + core_perf_cycle_count[c];
                 sum_instr = sum_instr + core_perf_instr_count[c];
                 sum_diverge = sum_diverge + core_perf_divergence_count[c];
                 sum_barrier = sum_barrier + core_perf_barrier_count[c];
                 sum_coalesced = sum_coalesced + core_coalesced_total[c];
+                sum_icache_hit = sum_icache_hit + core_icache_hit_count[c];
+                sum_icache_miss = sum_icache_miss + core_icache_miss_count[c];
             end
             perf_cycle_count <= sum_cycle;
             perf_instr_count <= sum_instr;
             perf_divergence_count <= sum_diverge;
             perf_barrier_count <= sum_barrier;
             perf_coalesced_count <= sum_coalesced;
+            perf_icache_hit_count <= sum_icache_hit;
+            perf_icache_miss_count <= sum_icache_miss;
         end
     end
 endmodule
