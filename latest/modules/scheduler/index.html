@@ -1375,6 +1375,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scoreboard-posted-memory-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scoreboard (posted memory operations)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#state-machine-idea" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1831,6 +1842,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scoreboard-posted-memory-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scoreboard (posted memory operations)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#state-machine-idea" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1922,10 +1944,11 @@
 <p>Source: <code>src/scheduler.sv</code></p>
 <h2 id="what-this-module-is">What this module is<a class="headerlink" href="#what-this-module-is" title="Permanent link">&para;</a></h2>
 <p><code>scheduler.sv</code> is the warp's master stage machine. If you want one file that explains the overall execution rhythm of a warp, this is the file.</p>
-<p>DeepWiki's execution-model page describes the six-stage flow <code>FETCH -&gt; DECODE -&gt; REQUEST -&gt; WAIT -&gt; EXECUTE -&gt; UPDATE</code>. This module is exactly where that flow is enforced — with three industry-style extensions:</p>
+<p>DeepWiki's execution-model page describes the six-stage flow <code>FETCH -&gt; DECODE -&gt; REQUEST -&gt; WAIT -&gt; EXECUTE -&gt; UPDATE</code>. This module is exactly where that flow is enforced — with four industry-style extensions:</p>
 <ul>
 <li><strong>branch divergence</strong> via per-lane PCs and min-PC reconvergence,</li>
-<li><strong><code>WAIT</code>-skip</strong> so non-memory instructions bypass the memory-wait stage, and</li>
+<li><strong><code>WAIT</code>-skip</strong> so non-memory instructions bypass the memory-wait stage,</li>
+<li><strong>scoreboarded issue</strong>: plain global <code>LDR</code>/<code>STR</code> are <em>posted</em> — the warp keeps executing while the access is in flight, and only genuinely dependent instructions stall (RAW/WAW on the load destination, further memory ops, <code>RET</code>/<code>BAR</code> drains), and</li>
 <li><strong>block-wide barriers</strong> (<code>BAR</code>) coordinated across all warps of the block.</li>
 </ul>
 <p>Each warp slice of a core instantiates its own scheduler; with the default <code>THREADS_PER_WARP = THREADS_PER_BLOCK</code> there is exactly one per core, which is the classic tiny-gpu shape.</p>
@@ -1991,8 +2014,10 @@
     IDLE --&gt; FETCH: start
     FETCH --&gt; DECODE: fetcher_state == FETCHED
     DECODE --&gt; REQUEST
+    REQUEST --&gt; REQUEST: scoreboard hazard (RAW/WAW/structural/drain)
     REQUEST --&gt; EXECUTE: no memory access decoded (WAIT-skip)
-    REQUEST --&gt; WAIT: LDR/STR/atomic/LDS/STS
+    REQUEST --&gt; EXECUTE: plain LDR/STR POSTED (scoreboarded)
+    REQUEST --&gt; WAIT: atomic / shared-memory op
     WAIT --&gt; WAIT: any LSU still REQUESTING or WAITING
     WAIT --&gt; EXECUTE: no LSU still REQUESTING/WAITING
     EXECUTE --&gt; UPDATE
@@ -2014,6 +2039,15 @@
 </ol>
 <h2 id="divergence-min-pc-reconvergence">Divergence (min-PC reconvergence)<a class="headerlink" href="#divergence-min-pc-reconvergence" title="Permanent link">&para;</a></h2>
 <p>Every lane keeps its own <code>thread_pc[i]</code>. Each step, the scheduler selects the <em>minimum</em> PC among runnable lanes and executes exactly the lanes parked there (<code>active_mask</code>). Lanes that branched ahead stay frozen until the rest catch up, at which point they automatically fall back into the same active mask. Correct for structured control flow with no explicit IPDOM stack; <code>perf_divergence_count</code> ticks whenever the active lanes are a strict subset of the live lanes.</p>
+<h2 id="scoreboard-posted-memory-operations">Scoreboard (posted memory operations)<a class="headerlink" href="#scoreboard-posted-memory-operations" title="Permanent link">&para;</a></h2>
+<p>A plain global <code>LDR</code>/<code>STR</code> does not hold the warp in <code>WAIT</code>. At <code>REQUEST</code> it <em>posts</em>: the LSUs launch the access, the scoreboard records <code>{posted_rd, posted_mask, is_load}</code>, and the instruction retires its PC normally while the memory access continues in the background. The next instructions issue freely unless they hit an interlock at <code>REQUEST</code>:</p>
+<ul>
+<li><strong>RAW</strong> — reads the posted load's destination register</li>
+<li><strong>WAW</strong> — writes the posted load's destination register</li>
+<li><strong>structural</strong> — is itself a memory op (one posted op per warp)</li>
+<li><strong>drain</strong> — <code>RET</code>/<code>BAR</code> must wait for all posted work to land</li>
+</ul>
+<p>Whether an instruction actually reads <code>rs</code>/<code>rt</code> is derived from the decoded control vector, so a <code>CONST</code>/<code>BRnzp</code> immediate that merely aliases a register index never falsely stalls. On completion the deferred register write commits through a dedicated posted write port (even if divergence has since masked the issuing lanes off), and the interlock releases one cycle later — so the dependent instruction always re-reads fresh operands. <code>perf_posted_count</code> counts posted ops.</p>
 <h2 id="state-machine-idea">State machine idea<a class="headerlink" href="#state-machine-idea" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>IDLE</code>: no active block</li>
