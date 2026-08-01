@@ -24,7 +24,7 @@ from .helpers.memory import Memory
 from .helpers.setup import setup
 
 # Opcodes this kernel is expected to issue.
-_EXPECTED_OPCODES = {"MUL", "ADD", "CONST", "CMP", "BRnzp", "BAR", "STR", "RET"}
+_EXPECTED_OPCODES = {"MUL", "ADD", "CONST", "CMP", "BRnzp", "BAR", "STR", "RET", "ATOMICADD"}
 
 
 @cocotb.test()
@@ -42,8 +42,15 @@ async def test_functional_coverage(dut):
         0b1001001001100100,  # 8  CONST R2, #100
         0b0011001100000010,  # 9  ADD   R3, R0, R2
         0b1100000000000000,  # 10 BAR
-        0b1000000000000011,  # 11 STR   R0, R3
-        0b1111000000000000,  # 12 RET
+        # ATOMICADD keeps the synchronous WAIT path alive in coverage: plain
+        # LDR/STR are POSTED by the scoreboard and skip WAIT entirely, so an
+        # atomic (which must hold its controller address lock through the
+        # read-modify-write) is now the canonical way to reach that state.
+        0b1001010100000001,  # 11 CONST R5, #1
+        0b1001101000011110,  # 12 CONST R10, #30
+        0b1010100110100101,  # 13 ATOMICADD R9, R10, R5   ; mem[30] += 1
+        0b1000000000000011,  # 14 STR   R0, R3
+        0b1111000000000000,  # 15 RET
     ]
 
     data_memory = Memory(dut=dut, addr_bits=8, data_bits=8, channels=4, name="data")
@@ -78,6 +85,12 @@ async def test_functional_coverage(dut):
         assert result == expected, (
             f"Result mismatch at index {i}: expected {expected}, got {result}"
         )
+
+    # The atomic counter saw one increment per thread (also proves the
+    # WAIT-path atomics still serialise correctly under the scoreboard).
+    assert data_memory.memory[30] == threads, (
+        f"atomic counter: expected {threads}, got {data_memory.memory[30]}"
+    )
 
     # Export the coverage database (standard MDV XML artifact).
     xml_path = coverage.export_xml()

@@ -50,6 +50,7 @@ module core_formal_top #(
     wire [31:0]                         perf_instr_count;
     wire [31:0]                         perf_divergence_count;
     wire [31:0]                         perf_barrier_count;
+    wire [31:0]                         perf_posted_count;
     wire [31:0]                         perf_icache_hit_count;
     wire [31:0]                         perf_icache_miss_count;
     wire                                done;
@@ -85,6 +86,7 @@ module core_formal_top #(
         .perf_instr_count(perf_instr_count),
         .perf_divergence_count(perf_divergence_count),
         .perf_barrier_count(perf_barrier_count),
+        .perf_posted_count(perf_posted_count),
         .perf_icache_hit_count(perf_icache_hit_count),
         .perf_icache_miss_count(perf_icache_miss_count)
     );

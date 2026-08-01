@@ -105,7 +105,12 @@ module scheduler_props #(
                     // Non-memory instructions skip WAIT and issue straight to
                     // EXECUTE (front-end optimization); memory instructions
                     // still pass through WAIT.
-                    REQUEST: assert (core_state == WAIT || core_state == EXECUTE);
+                    // REQUEST may hold itself: the scoreboard stalls a
+                    // hazard-blocked instruction (RAW/WAW on a posted load,
+                    // structural on the LSUs, or a RET/BAR drain) in REQUEST
+                    // until the posted memory operation completes.
+                    REQUEST: assert (core_state == REQUEST || core_state == WAIT
+                                     || core_state == EXECUTE);
                     WAIT:    assert (core_state == WAIT || core_state == EXECUTE);
                     EXECUTE: assert (core_state == UPDATE);
                     UPDATE:  assert (core_state == FETCH || core_state == DONE);

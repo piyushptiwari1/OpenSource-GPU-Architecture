@@ -43,6 +43,7 @@ OPCODES = [
     "LDR",
     "STR",
     "CONST",
+    "ATOMICADD",
     "BAR",
     "RET",
 ]
@@ -69,6 +70,7 @@ _OPCODE_MAP = {
     "0111": "LDR",
     "1000": "STR",
     "1001": "CONST",
+    "1010": "ATOMICADD",
     "1100": "BAR",
     "1111": "RET",
 }

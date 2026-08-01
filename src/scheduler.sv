@@ -25,6 +25,25 @@
 // For kernels with no data-dependent branches (e.g. matadd/matmul) every lane
 // always shares a single PC, so `active_mask` is simply all valid lanes every
 // cycle and the behaviour is identical to the original naive scheduler.
+//
+// Scoreboarded issue (posted memory operations)
+// ---------------------------------------------
+// Plain global LDR/STR no longer hold the warp in WAIT. They are POSTED:
+// the LSUs launch the access, the instruction retires its PC in UPDATE
+// immediately (a posted LDR's register write is deferred), and the warp
+// keeps fetching/executing subsequent instructions while the memory access
+// is in flight. A one-entry scoreboard guards correctness at issue (in the
+// REQUEST stage):
+//   RAW  : the next instruction reads the posted load's destination register
+//   WAW  : the next instruction writes the posted load's destination
+//   structural : the next instruction is itself a memory operation
+//   drain      : RET / BAR must wait until all posted work has landed
+// Any of these holds the warp in REQUEST until the posted op completes.
+// Completion is detected from the posted lanes' LSU states; the deferred
+// register write is committed through a dedicated posted write port and the
+// scoreboard is cleared one cycle before the stalled instruction re-reads
+// its operands, so it always observes the fresh value. Atomics and shared-
+// memory accesses keep the original synchronous WAIT path.
 module scheduler #(
     parameter THREADS_PER_BLOCK = 4
 ) (
@@ -43,6 +62,17 @@ module scheduler #(
     input decoded_mem_read_enable,
     input decoded_mem_write_enable,
     input decoded_ret,
+    // Scoreboard hazard inputs: register fields and control of the
+    // instruction currently in REQUEST, used to detect RAW/WAW against the
+    // posted operation and to derive whether rs/rt are actually read.
+    input [3:0] decoded_rd_address,
+    input [3:0] decoded_rs_address,
+    input [3:0] decoded_rt_address,
+    input decoded_reg_write_enable,
+    input [1:0] decoded_reg_input_mux,
+    input decoded_nzp_write_enable,
+    // Shared-memory ops (LDS/STS) are single-cycle islands: never posted.
+    input decoded_shared,
     // BAR (block-wide barrier): when asserted in UPDATE, the active lanes have
     // reached a barrier and are held until every live lane arrives.
     input decoded_barrier,
@@ -63,6 +93,25 @@ module scheduler #(
     input [2:0] fetcher_state,
     input [1:0] lsu_state [THREADS_PER_BLOCK-1:0],
 
+    // Posted-operation (scoreboard) interface to the warp slice.
+    //   posted_valid   : a posted LDR/STR is in flight
+    //   posted_is_load : it is a load (deferred register writeback pending)
+    //   posted_rd      : destination register of the posted load
+    //   posted_mask    : lanes participating in the posted op (its active
+    //                    mask at issue time - divergence-safe)
+    //   posted_ack     : one-cycle pulse when every posted lane's LSU has
+    //                    completed; the core commits the deferred register
+    //                    write and releases the LSUs on this pulse
+    //   issue_stall    : the instruction in REQUEST is hazard-blocked; the
+    //                    core masks the LSUs' view of REQUEST while high so
+    //                    a stalled memory op cannot launch early
+    output reg  posted_valid,
+    output reg  posted_is_load,
+    output reg  [3:0] posted_rd,
+    output reg  [THREADS_PER_BLOCK-1:0] posted_mask,
+    output wire posted_ack,
+    output wire issue_stall,
+
     // Current & Next PC
     output reg [7:0] current_pc,
     input [7:0] next_pc [THREADS_PER_BLOCK-1:0],
@@ -81,6 +130,8 @@ module scheduler #(
     output reg [31:0] perf_instr_count,
     output reg [31:0] perf_divergence_count,
     output reg [31:0] perf_barrier_count,
+    // Posted (scoreboarded) memory operations issued by this warp.
+    output reg [31:0] perf_posted_count,
 
     // Execution State
     output reg [2:0] core_state,
@@ -159,6 +210,53 @@ module scheduler #(
         || (core_state == UPDATE && decoded_barrier
             && ((live_mask & ~(thread_at_barrier | active_mask)) == '0)));
 
+    // ---- Scoreboard hazard detection (combinational, REQUEST stage) ----
+    // Which operand registers does the current instruction actually read?
+    // Derived from the decoded control vector so CONST/BRnzp immediates that
+    // merely alias a register index can never cause a false stall.
+    wire uses_alu = (decoded_reg_write_enable && decoded_reg_input_mux == 2'b00)
+                    || decoded_nzp_write_enable;              // arithmetic or CMP
+    wire reads_rs = uses_alu || decoded_mem_read_enable || decoded_mem_write_enable;
+    wire reads_rt = uses_alu || decoded_mem_write_enable;     // STR data / ALU rt
+
+    // Only plain global LDR / STR are posted. Atomics assert both mem
+    // enables; shared ops assert decoded_shared - both keep the WAIT path.
+    wire is_postable = (decoded_mem_read_enable ^ decoded_mem_write_enable)
+                       && !decoded_shared;
+
+    wire hazard_raw = posted_valid && posted_is_load
+                      && ((reads_rs && decoded_rs_address == posted_rd)
+                       || (reads_rt && decoded_rt_address == posted_rd));
+    wire hazard_waw = posted_valid && posted_is_load
+                      && decoded_reg_write_enable
+                      && decoded_rd_address == posted_rd;
+    wire hazard_struct = posted_valid
+                         && (decoded_mem_read_enable || decoded_mem_write_enable);
+    wire hazard_drain = posted_valid && (decoded_ret || decoded_barrier);
+
+    assign issue_stall = (core_state == REQUEST)
+                         && (hazard_raw || hazard_waw || hazard_struct || hazard_drain);
+
+    // Posted-op completion: every participating lane's LSU has reached DONE.
+    // The ack commits the deferred register write (in the core), releases the
+    // posted LSUs back to IDLE, and clears the scoreboard entry at the same
+    // edge. A hazard-stalled instruction re-evaluates against the REGISTERED
+    // posted_valid, so it proceeds one cycle after the writeback commits and
+    // its operand read is guaranteed to see the fresh value.
+    //
+    // Built from per-lane continuous assigns (NOT an @(*) loop over the
+    // unpacked lsu_state array): Icarus does not construct a reliable
+    // sensitivity list for unpacked-array element reads inside @(*), which
+    // would leave the ack stuck low and deadlock the structural stall.
+    wire [THREADS_PER_BLOCK-1:0] posted_lane_pending;
+    genvar pg;
+    generate
+        for (pg = 0; pg < THREADS_PER_BLOCK; pg = pg + 1) begin : posted_track
+            assign posted_lane_pending[pg] = posted_mask[pg] && (lsu_state[pg] != 2'b11);
+        end
+    endgenerate
+    assign posted_ack = posted_valid && (posted_lane_pending == '0);
+
     integer m;
     always @(posedge clk) begin 
         if (reset) begin
@@ -166,10 +264,20 @@ module scheduler #(
             done <= 0;
             thread_done <= '0;
             thread_at_barrier <= '0;
+            posted_valid <= 0;
+            posted_is_load <= 0;
+            posted_rd <= 0;
+            posted_mask <= '0;
             for (m = 0; m < THREADS_PER_BLOCK; m = m + 1) begin
                 thread_pc[m] <= 8'b0;
             end
         end else begin 
+            // Retire the posted operation once every posted lane's LSU is
+            // DONE (the core commits the deferred write on the same edge).
+            if (posted_ack) begin
+                posted_valid <= 0;
+                posted_is_load <= 0;
+            end
             // Active-cycle counter: tick whenever the core is doing work
             // (i.e. has been started and has not finished the block).
             if (core_state != IDLE && core_state != DONE) begin
@@ -222,12 +330,29 @@ module scheduler #(
                     core_state <= REQUEST;
                 end
                 REQUEST: begin 
-                    // Request is synchronous so we move on after one cycle.
-                    // Only memory instructions (LDR/STR/LDS/STS/atomics) have
-                    // LSU work to wait for; everything else skips WAIT and
-                    // goes straight to EXECUTE, saving a cycle per
-                    // non-memory instruction (issue: control-flow optimization).
-                    if (decoded_mem_read_enable || decoded_mem_write_enable) begin
+                    // Hazard-blocked instructions hold here until the posted
+                    // operation lands (the core masks the LSUs' view of
+                    // REQUEST while issue_stall is high, so a blocked memory
+                    // op cannot launch). Registers re-latch rs/rt every
+                    // stalled cycle, so operands are fresh on release.
+                    if (issue_stall) begin
+                        // hold in REQUEST
+                    end else if (is_postable) begin
+                        // POST the memory op: the LSUs of the active lanes
+                        // have just launched it; record it in the scoreboard
+                        // and proceed without waiting. A posted LDR's
+                        // register write is deferred until completion (the
+                        // core suppresses the MEMORY-mux write in UPDATE).
+                        posted_valid <= 1;
+                        posted_is_load <= decoded_mem_read_enable;
+                        posted_rd <= decoded_rd_address;
+                        posted_mask <= active_mask;
+                        perf_posted_count <= perf_posted_count + 1;
+                        core_state <= EXECUTE;
+                    end else if (decoded_mem_read_enable || decoded_mem_write_enable) begin
+                        // Atomics and shared-memory ops keep the synchronous
+                        // WAIT path (atomics hold a controller address lock;
+                        // shared ops complete in a cycle anyway).
                         core_state <= WAIT;
                     end else begin
                         core_state <= EXECUTE;
@@ -340,6 +465,7 @@ module scheduler #(
             perf_instr_count <= 32'b0;
             perf_divergence_count <= 32'b0;
             perf_barrier_count <= 32'b0;
+            perf_posted_count <= 32'b0;
         end
     end
 endmodule

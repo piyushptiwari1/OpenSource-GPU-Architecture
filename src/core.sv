@@ -84,6 +84,8 @@ module core #(
     output reg [31:0] perf_instr_count,
     output reg [31:0] perf_divergence_count,
     output reg [31:0] perf_barrier_count,
+    // Posted (scoreboarded) memory operations issued across all warps.
+    output reg [31:0] perf_posted_count,
     // Instruction-cache effectiveness (summed over this core's warp icaches).
     output reg [31:0] perf_icache_hit_count,
     output reg [31:0] perf_icache_miss_count
@@ -107,6 +109,7 @@ module core #(
     wire [31:0] warp_perf_instr [NUM_WARPS-1:0];
     wire [31:0] warp_perf_divergence [NUM_WARPS-1:0];
     wire [31:0] warp_perf_barrier [NUM_WARPS-1:0];
+    wire [31:0] warp_perf_posted [NUM_WARPS-1:0];
     wire [15:0] warp_icache_hit [NUM_WARPS-1:0];
     wire [15:0] warp_icache_miss [NUM_WARPS-1:0];
 
@@ -160,6 +163,49 @@ module core #(
             wire decoded_barrier;
             wire decoded_shared;
             wire decoded_ret;
+
+            // ---- Scoreboard (posted memory op) signals -------------------
+            wire posted_valid;
+            wire posted_is_load;
+            wire [3:0] posted_rd;
+            wire [THREADS_PER_WARP-1:0] posted_mask;
+            wire posted_ack;
+            wire issue_stall;
+
+            // The posted operation's memory-control kind, latched when the
+            // op issues from REQUEST. The decoder overwrites the live
+            // decoded_* vector as soon as the NEXT instruction decodes, so
+            // in-flight posted LSUs must see the kind of THEIR op, not the
+            // current one. (Latched every un-stalled REQUEST; only consulted
+            // while posted_valid.)
+            reg p_mem_read_enable;
+            reg p_mem_write_enable;
+            always @(posedge clk) begin
+                if (reset) begin
+                    p_mem_read_enable <= 1'b0;
+                    p_mem_write_enable <= 1'b0;
+                end else if (core_state == 3'b011 && !issue_stall
+                             && (decoded_mem_read_enable || decoded_mem_write_enable)) begin
+                    // Latch ONLY when a memory op actually issues from
+                    // REQUEST. A later non-memory instruction's REQUEST must
+                    // not clobber the in-flight posted op's control kind
+                    // (that would strand its LSUs mid-FSM).
+                    p_mem_read_enable <= decoded_mem_read_enable;
+                    p_mem_write_enable <= decoded_mem_write_enable;
+                end
+            end
+
+            // LSU view of the decoded memory controls: live for synchronous
+            // ops, held for the posted op while it is in flight. Posted ops
+            // are never shared/atomic by construction.
+            wire lsu_mem_read_enable  = posted_valid ? p_mem_read_enable  : decoded_mem_read_enable;
+            wire lsu_mem_write_enable = posted_valid ? p_mem_write_enable : decoded_mem_write_enable;
+            wire lsu_shared           = posted_valid ? 1'b0 : decoded_shared;
+            wire lsu_atomic_op        = posted_valid ? 1'b0 : decoded_atomic_op;
+
+            // Mask the LSUs' view of REQUEST while the instruction there is
+            // hazard-stalled, so a blocked memory op cannot launch early.
+            wire [2:0] lsu_core_state = issue_stall ? 3'b000 : core_state;
 
             // How many of this warp's lanes are valid for the current block.
             // Lanes [w*THREADS_PER_WARP, w*THREADS_PER_WARP + warp_thread_count)
@@ -269,9 +315,22 @@ module core #(
                 .decoded_mem_write_enable(decoded_mem_write_enable),
                 .decoded_ret(decoded_ret),
                 .decoded_barrier(decoded_barrier),
+                .decoded_rd_address(decoded_rd_address),
+                .decoded_rs_address(decoded_rs_address),
+                .decoded_rt_address(decoded_rt_address),
+                .decoded_reg_write_enable(decoded_reg_write_enable),
+                .decoded_reg_input_mux(decoded_reg_input_mux),
+                .decoded_nzp_write_enable(decoded_nzp_write_enable),
+                .decoded_shared(decoded_shared),
                 .barrier_release(barrier_release),
                 .warp_at_barrier(warp_at_barrier[w]),
                 .lsu_state(lsu_state),
+                .posted_valid(posted_valid),
+                .posted_is_load(posted_is_load),
+                .posted_rd(posted_rd),
+                .posted_mask(posted_mask),
+                .posted_ack(posted_ack),
+                .issue_stall(issue_stall),
                 .current_pc(current_pc),
                 .next_pc(next_pc),
                 .active_mask(active_mask),
@@ -279,6 +338,7 @@ module core #(
                 .perf_instr_count(warp_perf_instr[w]),
                 .perf_divergence_count(warp_perf_divergence[w]),
                 .perf_barrier_count(warp_perf_barrier[w]),
+                .perf_posted_count(warp_perf_posted[w]),
                 .done(warp_done[w])
             );
 
@@ -310,12 +370,21 @@ module core #(
                 lsu lsu_instance (
                     .clk(clk),
                     .reset(reset),
-                    .enable(active_mask[t]),
-                    .core_state(core_state),
-                    .decoded_mem_read_enable(decoded_mem_read_enable),
-                    .decoded_mem_write_enable(decoded_mem_write_enable),
-                    .decoded_atomic_op(decoded_atomic_op),
-                    .decoded_shared(decoded_shared),
+                    // While an op is posted, its lanes must keep progressing
+                    // even if divergence later masks them off, and OTHER
+                    // lanes' LSUs are frozen (a new memory op is structurally
+                    // stalled anyway, and non-memory ops never touch the LSU).
+                    .enable(posted_valid ? posted_mask[t] : active_mask[t]),
+                    .core_state(lsu_core_state),
+                    // Release a completed op: at the owning instruction's
+                    // UPDATE for synchronous ops, or at the scoreboard ack
+                    // for posted ops.
+                    .op_release(posted_valid ? (posted_ack && posted_mask[t])
+                                             : (core_state == 3'b110)),
+                    .decoded_mem_read_enable(lsu_mem_read_enable),
+                    .decoded_mem_write_enable(lsu_mem_write_enable),
+                    .decoded_atomic_op(lsu_atomic_op),
+                    .decoded_shared(lsu_shared),
                     .mem_read_valid(data_mem_read_valid[GLOBAL_LANE]),
                     .mem_read_address(data_mem_read_address[GLOBAL_LANE]),
                     .mem_read_ready(data_mem_read_ready[GLOBAL_LANE]),
@@ -352,7 +421,14 @@ module core #(
                     .enable(active_mask[t]),
                     .block_id(block_id),
                     .core_state(core_state),
-                    .decoded_reg_write_enable(decoded_reg_write_enable),
+                    // A posting LDR defers its register write to completion:
+                    // suppress the MEMORY-mux write in its UPDATE stage (no
+                    // other instruction can be in UPDATE with the MEMORY mux
+                    // while an op is posted - it would be structurally
+                    // stalled in REQUEST).
+                    .decoded_reg_write_enable(decoded_reg_write_enable
+                        && !(posted_valid && decoded_reg_input_mux == 2'b01
+                             && decoded_mem_read_enable)),
                     .decoded_reg_input_mux(decoded_reg_input_mux),
                     .decoded_rd_address(decoded_rd_address),
                     .decoded_rs_address(decoded_rs_address),
@@ -360,6 +436,10 @@ module core #(
                     .decoded_immediate(decoded_immediate),
                     .alu_out(alu_out[t]),
                     .lsu_out(lsu_out[t]),
+                    // Deferred posted-load writeback, committed on the
+                    // scoreboard ack for the lanes that issued the load.
+                    .posted_write_enable(posted_ack && posted_is_load && posted_mask[t]),
+                    .posted_rd_address(posted_rd),
                     .rs(rs[t]),
                     .rt(rt[t])
                 );
@@ -395,7 +475,7 @@ module core #(
     // Registered (rather than combinational) because Icarus does not build a
     // reliable @(*) sensitivity list over unpacked-array element reads.
     integer pw;
-    reg [31:0] sum_cycle, sum_instr, sum_diverge, sum_barrier;
+    reg [31:0] sum_cycle, sum_instr, sum_diverge, sum_barrier, sum_posted;
     reg [31:0] sum_icache_hit, sum_icache_miss;
     always @(posedge clk) begin
         if (perf_reset) begin
@@ -403,6 +483,7 @@ module core #(
             perf_instr_count <= 32'b0;
             perf_divergence_count <= 32'b0;
             perf_barrier_count <= 32'b0;
+            perf_posted_count <= 32'b0;
             perf_icache_hit_count <= 32'b0;
             perf_icache_miss_count <= 32'b0;
         end else begin
@@ -410,6 +491,7 @@ module core #(
             sum_instr = 32'b0;
             sum_diverge = 32'b0;
             sum_barrier = 32'b0;
+            sum_posted = 32'b0;
             sum_icache_hit = 32'b0;
             sum_icache_miss = 32'b0;
             for (pw = 0; pw < NUM_WARPS; pw = pw + 1) begin
@@ -417,6 +499,7 @@ module core #(
                 sum_instr = sum_instr + warp_perf_instr[pw];
                 sum_diverge = sum_diverge + warp_perf_divergence[pw];
                 sum_barrier = sum_barrier + warp_perf_barrier[pw];
+                sum_posted = sum_posted + warp_perf_posted[pw];
                 sum_icache_hit = sum_icache_hit + {16'b0, warp_icache_hit[pw]};
                 sum_icache_miss = sum_icache_miss + {16'b0, warp_icache_miss[pw]};
             end
@@ -424,6 +507,7 @@ module core #(
             perf_instr_count <= sum_instr;
             perf_divergence_count <= sum_diverge;
             perf_barrier_count <= sum_barrier;
+            perf_posted_count <= sum_posted;
             perf_icache_hit_count <= sum_icache_hit;
             perf_icache_miss_count <= sum_icache_miss;
         end

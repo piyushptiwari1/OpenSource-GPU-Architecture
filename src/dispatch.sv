@@ -83,13 +83,25 @@ module dispatch #(
             end
             blocks_dispatched <= next_blocks_dispatched;
 
-            for (int i = 0; i < NUM_CORES; i++) begin
-                if (core_start[i] && core_done[i]) begin
-                    // If a core just finished executing it's current block, reset it
-                    core_reset[i] <= 1;
-                    core_start[i] <= 0;
-                    blocks_done <= blocks_done + 1;
+            // Accumulate same-cycle completions with a blocking local:
+            // two cores finishing in the SAME cycle must count as two
+            // blocks. (Per-core NBA increments of blocks_done would
+            // collapse to +1 - a lost update that leaves the kernel's
+            // `done` unreachable. Latent upstream bug, exposed once the
+            // scoreboarded cores started finishing symmetric blocks in
+            // the same cycle.)
+            begin
+                reg [7:0] next_blocks_done;
+                next_blocks_done = blocks_done;
+                for (int i = 0; i < NUM_CORES; i++) begin
+                    if (core_start[i] && core_done[i]) begin
+                        // If a core just finished executing it's current block, reset it
+                        core_reset[i] <= 1;
+                        core_start[i] <= 0;
+                        next_blocks_done = next_blocks_done + 1;
+                    end
                 end
+                blocks_done <= next_blocks_done;
             end
         end
     end

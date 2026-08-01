@@ -200,10 +200,24 @@ async def test_warp_scheduling(dut):
         format_cycle(dut, cycles)
 
         # Latency-hiding evidence: within a core, one warp waits on memory
-        # while the sibling warp makes forward progress.
+        # while the sibling warp makes forward progress. With the scoreboard,
+        # "waiting on memory" is either the synchronous WAIT state (atomics/
+        # shared) or a hazard-stall in REQUEST while a posted LDR/STR is in
+        # flight (plain loads/stores no longer sit in WAIT - the warp keeps
+        # executing until a dependent instruction actually blocks).
         for core in dut.cores:
-            states = [int(w.core_state.value) for w in core.core_instance.warps]
-            if any(s == WAIT_STATE for s in states) and any(s in BUSY_STATES for s in states):
+            blocked = []
+            progressing = []
+            for w in core.core_instance.warps:
+                s = int(w.core_state.value)
+                stalled = (
+                    int(w.scheduler_instance.posted_valid.value) == 1
+                    and int(w.scheduler_instance.issue_stall.value) == 1
+                )
+                is_blocked = (s == WAIT_STATE) or stalled
+                blocked.append(is_blocked)
+                progressing.append(s in BUSY_STATES and not is_blocked)
+            if any(blocked) and any(progressing):
                 overlap_cycles += 1
 
         await RisingEdge(dut.clk)
@@ -243,10 +257,12 @@ async def test_warp_scheduling(dut):
     #    guaranteed; a lockstep single-warp core always scores 0 here.
     if num_warps > 1:
         assert overlap_cycles > 0, (
-            "expected at least one cycle where a warp waited on memory while "
-            "its sibling warp executed - warp scheduling is not hiding latency"
+            "expected at least one cycle where a warp was blocked on memory "
+            "while its sibling warp executed - warp scheduling is not hiding "
+            "latency"
         )
     else:
         assert overlap_cycles == 0, (
-            "a single-warp core cannot overlap WAIT with execution"
+            "a single-warp core cannot overlap a memory-blocked warp with a "
+            "progressing one"
         )

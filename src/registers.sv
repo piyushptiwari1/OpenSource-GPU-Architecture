@@ -33,6 +33,14 @@ module registers #(
     input [DATA_BITS-1:0] alu_out,
     input [DATA_BITS-1:0] lsu_out,
 
+    // Posted-load writeback port (scoreboard). Committed independently of
+    // `enable`/`core_state`: a posted load may land while this lane is
+    // masked off by divergence or while the warp is executing a different
+    // instruction. WAW hazards are blocked at issue, so this write can
+    // never collide with the normal UPDATE-stage write below.
+    input posted_write_enable,
+    input [3:0] posted_rd_address,
+
     // Registers
     output reg [7:0] rs,
     output reg [7:0] rt
@@ -67,34 +75,43 @@ module registers #(
             registers[13] <= 8'b0;              // %blockIdx
             registers[14] <= THREADS_PER_BLOCK; // %blockDim
             registers[15] <= THREAD_ID;         // %threadIdx
-        end else if (enable) begin 
-            // [Bad Solution] Shouldn't need to set this every cycle
-            registers[13] <= block_id; // Update the block_id when a new block is issued from dispatcher
-            
-            // Fill rs/rt when core_state = REQUEST
-            if (core_state == 3'b011) begin 
-                rs <= registers[decoded_rs_address];
-                rt <= registers[decoded_rt_address];
+        end else begin
+            // Posted-load writeback: deferred result of a scoreboarded LDR.
+            // Runs regardless of `enable` (the lane may be divergence-masked
+            // by the time the memory access lands).
+            if (posted_write_enable && posted_rd_address < 13) begin
+                registers[posted_rd_address] <= lsu_out;
             end
 
-            // Store rd when core_state = UPDATE
-            if (core_state == 3'b110) begin 
-                // Only allow writing to R0 - R12
-                if (decoded_reg_write_enable && decoded_rd_address < 13) begin
-                    case (decoded_reg_input_mux)
-                        ARITHMETIC: begin 
-                            // ADD, SUB, MUL, DIV
-                            registers[decoded_rd_address] <= alu_out;
-                        end
-                        MEMORY: begin 
-                            // LDR
-                            registers[decoded_rd_address] <= lsu_out;
-                        end
-                        CONSTANT: begin 
-                            // CONST
-                            registers[decoded_rd_address] <= decoded_immediate;
-                        end
-                    endcase
+            if (enable) begin
+                // [Bad Solution] Shouldn't need to set this every cycle
+                registers[13] <= block_id; // Update the block_id when a new block is issued from dispatcher
+
+                // Fill rs/rt when core_state = REQUEST
+                if (core_state == 3'b011) begin
+                    rs <= registers[decoded_rs_address];
+                    rt <= registers[decoded_rt_address];
+                end
+
+                // Store rd when core_state = UPDATE
+                if (core_state == 3'b110) begin
+                    // Only allow writing to R0 - R12
+                    if (decoded_reg_write_enable && decoded_rd_address < 13) begin
+                        case (decoded_reg_input_mux)
+                            ARITHMETIC: begin
+                                // ADD, SUB, MUL, DIV
+                                registers[decoded_rd_address] <= alu_out;
+                            end
+                            MEMORY: begin
+                                // LDR
+                                registers[decoded_rd_address] <= lsu_out;
+                            end
+                            CONSTANT: begin
+                                // CONST
+                                registers[decoded_rd_address] <= decoded_immediate;
+                            end
+                        endcase
+                    end
                 end
             end
         end

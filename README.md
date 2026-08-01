@@ -148,10 +148,11 @@ In this simplified GPU, each core processed one **block** at a time, and for eac
 
 Each core partitions its block into **warps** of `THREADS_PER_WARP` lanes, and every warp has its own scheduler (warp slice). With the default `THREADS_PER_WARP = THREADS_PER_BLOCK` the whole block is one warp and the design behaves like the classic single-scheduler tiny-gpu. Setting a smaller warp size (e.g. `THREADS_PER_WARP = 2` with a block of 4) yields multiple concurrent warps per core that **hide each other's memory latency** — the defining trick of real GPU schedulers. On a latency-bound kernel, 2 warps/core cut execution from 868 to 647 cycles by overlapping one warp's ALU work with the other's memory waits (`test/test_warp_scheduling_e2e.py`).
 
-Each warp scheduler runs the six-stage instruction lifecycle (`FETCH → DECODE → REQUEST → WAIT → EXECUTE → UPDATE`), with two throughput optimizations over the naive flow:
+Each warp scheduler runs the six-stage instruction lifecycle (`FETCH → DECODE → REQUEST → WAIT → EXECUTE → UPDATE`), with three throughput optimizations over the naive flow:
 
-- instructions that touch no memory **skip the `WAIT` stage** entirely, and
-- the fetch of the *next* instruction is **overlapped with execution** of the current one (see Fetcher below).
+- instructions that touch no memory **skip the `WAIT` stage** entirely,
+- the fetch of the *next* instruction is **overlapped with execution** of the current one (see Fetcher below), and
+- plain global `LDR`/`STR` are **posted through a scoreboard**: the access launches and the warp keeps executing subsequent instructions while it is in flight. A one-entry scoreboard blocks only genuinely dependent instructions at issue — RAW/WAW against the posted load's destination register, further memory ops (structural), and `RET`/`BAR` (drain) — and the load's register write is committed out-of-band when the memory responds, even if divergence has since masked the issuing lanes. `test_scoreboard_e2e.py` proves it with an A/B pair of kernels containing identical instructions in different orders: the software-pipelined schedule beats the naive one by 40 cycles because four independent ALU instructions execute inside the load's latency window. Atomics keep the synchronous `WAIT` path (they hold a controller address lock through their read-modify-write).
 
 The scheduler also implements **branch divergence** via min-PC reconvergence: every lane keeps its own PC, the scheduler executes the subset of lanes parked at the minimum PC each step, and diverged lanes automatically reconverge. Block-wide `BAR` barriers synchronise across *all* warps of the block through a per-core barrier coordinator.
 
@@ -408,6 +409,7 @@ Modern GPUs implement many features beyond the minimal learning core. This fork 
 | Address-range (burst) coalescing via multi-word line fills | ✅ implemented | `l2_cache.sv` | `test_burst_coalescing_e2e.py` |
 | Front-end pipelining (speculative prefetch, BTFN) | ✅ implemented | `fetcher.sv` | `test_matmul.py` (−29% cycles), full sweep |
 | `WAIT`-skip for non-memory instructions | ✅ implemented | `scheduler.sv` | full sweep |
+| Scoreboarded issue: posted LDR/STR, out-of-order completion, hazard interlocks | ✅ implemented | `scheduler.sv` + `core.sv` + `lsu.sv` + `registers.sv` | `test_scoreboard_e2e.py` (A/B: −40 cycles) |
 | Warp scheduling (multi-warp cores, latency hiding) | ✅ implemented | `core.sv` + `scheduler.sv` | `test_warp_scheduling_e2e.py` (−25% cycles) |
 | Branch divergence (min-PC reconvergence) | ✅ implemented | `scheduler.sv` | `test_divergence_e2e.py`, `test_nested_divergence.py` |
 | Warp-level memory coalescing (same-address reads) | ✅ implemented | `gpu.sv` | `test_coalesce_broadcast_e2e.py` |
@@ -470,7 +472,8 @@ Roadmap status — items from the original tiny-gpu wishlist that this fork has 
 - [x] Warp scheduling — multi-warp cores with cross-warp barriers (`THREADS_PER_WARP` parameter)
 - [x] Data cache — line-interleaved write-through L2 between the memory controller and external memory (`l2_cache.sv`)
 - [x] Address-range (burst) coalescing — 4-word L2 lines filled by sequential bursts; 32 strided loads → 4 line bursts in `test_burst_coalescing_e2e.py`
-- [ ] Scoreboarded issue pipeline (multiple instructions in flight per warp)
+- [x] Scoreboarded issue pipeline — posted memory ops with RAW/WAW/structural/drain interlocks and deferred writeback (`test_scoreboard_e2e.py`)
+- [ ] Multi-instruction issue (dual-issue / operand collectors)
 - [ ] Dedicated graphics hardware path (the `rasterizer.sv` / `framebuffer.sv` SoC modules are not yet wired into the verified `gpu` top)
 
 **For anyone curious to play around or make a contribution, feel free to put up a PR with any improvements you'd like to add 😄**

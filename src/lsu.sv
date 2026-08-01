@@ -13,6 +13,13 @@ module lsu (
     // State
     input [2:0] core_state,
 
+    // Completion handshake: high releases a finished (DONE) operation back
+    // to IDLE. For synchronous ops the core drives this during the owning
+    // instruction's UPDATE stage (the original behaviour); for POSTED ops it
+    // is driven by the scoreboard's completion ack, which may arrive many
+    // instructions later.
+    input op_release,
+
     // Memory Control Sgiansl
     input decoded_mem_read_enable,
     input decoded_mem_write_enable,
@@ -115,7 +122,7 @@ module lsu (
                             end
                         end
                         DONE: begin
-                            if (core_state == 3'b110) begin
+                            if (op_release) begin
                                 lsu_state <= IDLE;
                             end
                         end
@@ -140,7 +147,7 @@ module lsu (
                             end
                         end
                         DONE: begin
-                            if (core_state == 3'b110) begin
+                            if (op_release) begin
                                 lsu_state <= IDLE;
                             end
                         end
@@ -194,7 +201,7 @@ module lsu (
                         end
                     end
                     DONE: begin
-                        if (core_state == 3'b110) begin
+                        if (op_release) begin
                             lsu_state    <= IDLE;
                             atomic_phase <= 0;
                         end
@@ -225,7 +232,7 @@ module lsu (
                     end
                     DONE: begin 
                         // Reset when core_state = UPDATE
-                        if (core_state == 3'b110) begin 
+                        if (op_release) begin
                             lsu_state <= IDLE;
                         end
                     end
@@ -256,7 +263,7 @@ module lsu (
                     end
                     DONE: begin 
                         // Reset when core_state = UPDATE
-                        if (core_state == 3'b110) begin 
+                        if (op_release) begin
                             lsu_state <= IDLE;
                         end
                     end

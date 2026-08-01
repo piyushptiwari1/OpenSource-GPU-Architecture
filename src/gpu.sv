@@ -65,7 +65,10 @@ module gpu #(
     // L2 data cache effectiveness (banked cache between the data memory
     // controller and external memory; read hits stay on-chip).
     output wire [31:0] perf_l2_hit_count,
-    output wire [31:0] perf_l2_miss_count
+    output wire [31:0] perf_l2_miss_count,
+    // Posted (scoreboarded) memory operations, aggregated across all cores.
+    // Each posted op overlapped its memory latency with continued execution.
+    output reg [31:0] perf_posted_count
 );
     // Control
     wire [7:0] thread_count;
@@ -107,6 +110,8 @@ module gpu #(
     // Per-core L1 instruction-cache hit/miss counts (summed over warps).
     wire [31:0] core_icache_hit_count [NUM_CORES-1:0];
     wire [31:0] core_icache_miss_count [NUM_CORES-1:0];
+    // Per-core posted (scoreboarded) memory-op counts.
+    wire [31:0] core_posted_count [NUM_CORES-1:0];
 
     // Controller <> L2 data cache channel wires. The data memory controller's
     // memory-side ports no longer reach the external pins directly; the
@@ -404,6 +409,7 @@ module gpu #(
                 .perf_instr_count(core_perf_instr_count[i]),
                 .perf_divergence_count(core_perf_divergence_count[i]),
                 .perf_barrier_count(core_perf_barrier_count[i]),
+                .perf_posted_count(core_posted_count[i]),
                 .perf_icache_hit_count(core_icache_hit_count[i]),
                 .perf_icache_miss_count(core_icache_miss_count[i])
             );
@@ -415,7 +421,7 @@ module gpu #(
     // reliable @(*) sensitivity list over unpacked-array element reads.
     integer c;
     reg [31:0] sum_cycle, sum_instr, sum_diverge, sum_barrier, sum_coalesced;
-    reg [31:0] sum_icache_hit, sum_icache_miss;
+    reg [31:0] sum_icache_hit, sum_icache_miss, sum_posted;
     always @(posedge clk) begin
         if (reset) begin
             perf_cycle_count <= 32'b0;
@@ -425,6 +431,7 @@ module gpu #(
             perf_coalesced_count <= 32'b0;
             perf_icache_hit_count <= 32'b0;
             perf_icache_miss_count <= 32'b0;
+            perf_posted_count <= 32'b0;
         end else begin
             sum_cycle = 32'b0;
             sum_instr = 32'b0;
@@ -433,6 +440,7 @@ module gpu #(
             sum_coalesced = 32'b0;
             sum_icache_hit = 32'b0;
             sum_icache_miss = 32'b0;
+            sum_posted = 32'b0;
             for (c = 0; c < NUM_CORES; c = c + 1) begin
                 sum_cycle = sum_cycle + core_perf_cycle_count[c];
                 sum_instr = sum_instr + core_perf_instr_count[c];
@@ -441,6 +449,7 @@ module gpu #(
                 sum_coalesced = sum_coalesced + core_coalesced_total[c];
                 sum_icache_hit = sum_icache_hit + core_icache_hit_count[c];
                 sum_icache_miss = sum_icache_miss + core_icache_miss_count[c];
+                sum_posted = sum_posted + core_posted_count[c];
             end
             perf_cycle_count <= sum_cycle;
             perf_instr_count <= sum_instr;
@@ -449,6 +458,7 @@ module gpu #(
             perf_coalesced_count <= sum_coalesced;
             perf_icache_hit_count <= sum_icache_hit;
             perf_icache_miss_count <= sum_icache_miss;
+            perf_posted_count <= sum_posted;
         end
     end
 endmodule

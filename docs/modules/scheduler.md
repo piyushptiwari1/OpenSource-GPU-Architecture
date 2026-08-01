@@ -6,10 +6,11 @@ Source: `src/scheduler.sv`
 
 `scheduler.sv` is the warp's master stage machine. If you want one file that explains the overall execution rhythm of a warp, this is the file.
 
-DeepWiki's execution-model page describes the six-stage flow `FETCH -> DECODE -> REQUEST -> WAIT -> EXECUTE -> UPDATE`. This module is exactly where that flow is enforced — with three industry-style extensions:
+DeepWiki's execution-model page describes the six-stage flow `FETCH -> DECODE -> REQUEST -> WAIT -> EXECUTE -> UPDATE`. This module is exactly where that flow is enforced — with four industry-style extensions:
 
 - **branch divergence** via per-lane PCs and min-PC reconvergence,
-- **`WAIT`-skip** so non-memory instructions bypass the memory-wait stage, and
+- **`WAIT`-skip** so non-memory instructions bypass the memory-wait stage,
+- **scoreboarded issue**: plain global `LDR`/`STR` are *posted* — the warp keeps executing while the access is in flight, and only genuinely dependent instructions stall (RAW/WAW on the load destination, further memory ops, `RET`/`BAR` drains), and
 - **block-wide barriers** (`BAR`) coordinated across all warps of the block.
 
 Each warp slice of a core instantiates its own scheduler; with the default `THREADS_PER_WARP = THREADS_PER_BLOCK` there is exactly one per core, which is the classic tiny-gpu shape.
@@ -48,8 +49,10 @@ stateDiagram-v2
     IDLE --> FETCH: start
     FETCH --> DECODE: fetcher_state == FETCHED
     DECODE --> REQUEST
+    REQUEST --> REQUEST: scoreboard hazard (RAW/WAW/structural/drain)
     REQUEST --> EXECUTE: no memory access decoded (WAIT-skip)
-    REQUEST --> WAIT: LDR/STR/atomic/LDS/STS
+    REQUEST --> EXECUTE: plain LDR/STR POSTED (scoreboarded)
+    REQUEST --> WAIT: atomic / shared-memory op
     WAIT --> WAIT: any LSU still REQUESTING or WAITING
     WAIT --> EXECUTE: no LSU still REQUESTING/WAITING
     EXECUTE --> UPDATE
@@ -74,6 +77,17 @@ stateDiagram-v2
 ## Divergence (min-PC reconvergence)
 
 Every lane keeps its own `thread_pc[i]`. Each step, the scheduler selects the *minimum* PC among runnable lanes and executes exactly the lanes parked there (`active_mask`). Lanes that branched ahead stay frozen until the rest catch up, at which point they automatically fall back into the same active mask. Correct for structured control flow with no explicit IPDOM stack; `perf_divergence_count` ticks whenever the active lanes are a strict subset of the live lanes.
+
+## Scoreboard (posted memory operations)
+
+A plain global `LDR`/`STR` does not hold the warp in `WAIT`. At `REQUEST` it *posts*: the LSUs launch the access, the scoreboard records `{posted_rd, posted_mask, is_load}`, and the instruction retires its PC normally while the memory access continues in the background. The next instructions issue freely unless they hit an interlock at `REQUEST`:
+
+- **RAW** — reads the posted load's destination register
+- **WAW** — writes the posted load's destination register
+- **structural** — is itself a memory op (one posted op per warp)
+- **drain** — `RET`/`BAR` must wait for all posted work to land
+
+Whether an instruction actually reads `rs`/`rt` is derived from the decoded control vector, so a `CONST`/`BRnzp` immediate that merely aliases a register index never falsely stalls. On completion the deferred register write commits through a dedicated posted write port (even if divergence has since masked the issuing lanes off), and the interlock releases one cycle later — so the dependent instruction always re-reads fresh operands. `perf_posted_count` counts posted ops.
 
 ## State machine idea
 
