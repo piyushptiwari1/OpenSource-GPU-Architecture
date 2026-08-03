@@ -417,6 +417,7 @@ Modern GPUs implement many features beyond the minimal learning core. This fork 
 | Barriers (block-wide, cross-warp) | ✅ implemented | `scheduler.sv` + `core.sv` | `test_barrier_e2e.py`, `test_warp_scheduling_e2e.py` |
 | Atomics (`ATOMICADD` / `ATOMICCAS`) | ✅ implemented | `lsu.sv` + `controller.sv` | `test_atomic_add.py`, `test_atomic_cas.py` |
 | Graphics kernel (SIMT rasterizer) | ✅ implemented | ISA kernel | `test_graphics_e2e.py` |
+| Fixed-function graphics hardware (rasterizer + raster writer) | ✅ implemented | `rasterizer.sv` + `raster_writer.sv` | `test_raster_hw_e2e.py` |
 
 ### Multi-layered Cache & Shared Memory
 
@@ -444,7 +445,14 @@ Another strategy used to maximize resource utilization on course is **warp sched
 
 Multiple warps can be executed on a single core simultaneously by executing instructions from one warp while another warp is waiting. This is similar to pipelining, but dealing with instructions from different threads.
 
-This fork implements it: set `THREADS_PER_WARP < THREADS_PER_BLOCK` on the `gpu` top and each core partitions its block into independent warp slices (own fetcher + icache + decoder + scheduler) that share the block's datapath lanes, shared-memory island, and barrier coordinator. `test/test_warp_scheduling_e2e.py` builds the 2-warps-per-core configuration and measures 310 cycles of true overlap (one warp executing while another waits on memory) on a latency-bound kernel — 868 → 647 cycles vs. lockstep.
+This fork implements it: set `THREADS_PER_WARP < THREADS_PER_BLOCK` on the `gpu` top and each core partitions its block into independent warp slices (own fetcher + icache + decoder + scheduler) that share the block's datapath lanes, shared-memory island, and barrier coordinator. `test/test_warp_scheduling_e2e.py` builds the 2-warps-per-core configuration and measures true overlap (one warp executing while another is blocked on memory) on a latency-bound kernel — 868 → 647 cycles vs. lockstep.
+
+### Graphics Hardware
+
+This fork implements both halves of the graphics story:
+
+- **Programmable**: a SIMT edge-function rasterizer kernel (`test_graphics_e2e.py`) renders a triangle purely in software on the compute cores, with real per-pixel divergence.
+- **Fixed-function**: a hardware rasterizer (`rasterizer.sv` — points, Bresenham lines, rectangles, edge-function triangles) is wired into the `gpu` top. The host submits primitives on the `raster_*` command ports (exactly how pre-shader GPUs took commands), and a small `raster_writer` streams the covered pixels into the framebuffer window of data memory as one extra memory-controller consumer — through the same write-through L2 as the SIMT lanes' stores. `test_raster_hw_e2e.py` renders a triangle + rectangle in hardware, checks the framebuffer pixel-for-pixel against a software reference, then launches a SIMT kernel that reads the image back and computes row sums — fixed-function and programmable engines sharing one coherent memory hierarchy, which is the defining structure of a real GPU.
 
 ### Branch Divergence
 
@@ -473,8 +481,8 @@ Roadmap status — items from the original tiny-gpu wishlist that this fork has 
 - [x] Data cache — line-interleaved write-through L2 between the memory controller and external memory (`l2_cache.sv`)
 - [x] Address-range (burst) coalescing — 4-word L2 lines filled by sequential bursts; 32 strided loads → 4 line bursts in `test_burst_coalescing_e2e.py`
 - [x] Scoreboarded issue pipeline — posted memory ops with RAW/WAW/structural/drain interlocks and deferred writeback (`test_scoreboard_e2e.py`)
+- [x] Dedicated graphics hardware path — the fixed-function `rasterizer.sv` is wired into the `gpu` top via a `raster_writer` memory consumer: the host submits point/line/rect/triangle primitives, rendered pixels land in the data-memory framebuffer through the shared controller + L2, and SIMT kernels read them back coherently (`test_raster_hw_e2e.py`)
 - [ ] Multi-instruction issue (dual-issue / operand collectors)
-- [ ] Dedicated graphics hardware path (the `rasterizer.sv` / `framebuffer.sv` SoC modules are not yet wired into the verified `gpu` top)
 
 **For anyone curious to play around or make a contribution, feel free to put up a PR with any improvements you'd like to add 😄**
 

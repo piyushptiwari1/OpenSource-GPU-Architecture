@@ -68,7 +68,28 @@ module gpu #(
     output wire [31:0] perf_l2_miss_count,
     // Posted (scoreboarded) memory operations, aggregated across all cores.
     // Each posted op overlapped its memory latency with continued execution.
-    output reg [31:0] perf_posted_count
+    output reg [31:0] perf_posted_count,
+
+    // Fixed-function rasterizer command interface (host-driven, like the
+    // DCR: the host submits one primitive at a time, exactly how pre-shader
+    // GPUs took point/line/rect/triangle commands). Rendered pixels are
+    // written into the framebuffer window of data memory through the same
+    // memory controller + write-through L2 as the SIMT lanes' stores, so
+    // kernels can read rendered output back with plain LDRs, coherently.
+    input wire raster_cmd_valid,
+    input wire [2:0] raster_cmd_op,           // 001=POINT 010=LINE 011=RECT 100=TRIANGLE
+    input wire [7:0] raster_x0,
+    input wire [7:0] raster_y0,
+    input wire [7:0] raster_x1,
+    input wire [7:0] raster_y1,
+    input wire [7:0] raster_x2,
+    input wire [7:0] raster_y2,
+    input wire [7:0] raster_color,
+    output wire raster_cmd_ready,
+    // Busy covers the full path: primitive walk AND every pixel write
+    // committed to memory. Poll !raster_busy before reading the frame.
+    output wire raster_busy,
+    output wire raster_done
 );
     // Control
     wire [7:0] thread_count;
@@ -82,15 +103,42 @@ module gpu #(
 
     // LSU <> Data Memory Controller Channels
     localparam NUM_LSUS = NUM_CORES * THREADS_PER_BLOCK;
+    // The data memory controller serves the SIMT lanes' LSUs plus one extra
+    // consumer: the fixed-function raster writer.
+    localparam NUM_DMEM_CONSUMERS = NUM_LSUS + 1;
     reg [NUM_LSUS-1:0] lsu_read_valid;
     reg [DATA_MEM_ADDR_BITS-1:0] lsu_read_address [NUM_LSUS-1:0];
-    reg [NUM_LSUS-1:0] lsu_read_ready;
-    reg [DATA_MEM_DATA_BITS-1:0] lsu_read_data [NUM_LSUS-1:0];
+    wire [NUM_LSUS-1:0] lsu_read_ready;
+    wire [DATA_MEM_DATA_BITS-1:0] lsu_read_data [NUM_LSUS-1:0];
     reg [NUM_LSUS-1:0] lsu_write_valid;
     reg [DATA_MEM_ADDR_BITS-1:0] lsu_write_address [NUM_LSUS-1:0];
     reg [DATA_MEM_DATA_BITS-1:0] lsu_write_data [NUM_LSUS-1:0];
-    reg [NUM_LSUS-1:0] lsu_write_ready;
+    wire [NUM_LSUS-1:0] lsu_write_ready;
     wire [NUM_LSUS-1:0] lsu_atomic;
+
+    // Combined consumer arrays presented to the data memory controller:
+    // slots [0, NUM_LSUS) are the lanes, slot NUM_LSUS is the raster writer.
+    wire [NUM_DMEM_CONSUMERS-1:0] dmem_read_valid;
+    wire [DATA_MEM_ADDR_BITS-1:0] dmem_read_address [NUM_DMEM_CONSUMERS-1:0];
+    wire [NUM_DMEM_CONSUMERS-1:0] dmem_read_ready;
+    wire [DATA_MEM_DATA_BITS-1:0] dmem_read_data [NUM_DMEM_CONSUMERS-1:0];
+    wire [NUM_DMEM_CONSUMERS-1:0] dmem_write_valid;
+    wire [DATA_MEM_ADDR_BITS-1:0] dmem_write_address [NUM_DMEM_CONSUMERS-1:0];
+    wire [DATA_MEM_DATA_BITS-1:0] dmem_write_data [NUM_DMEM_CONSUMERS-1:0];
+    wire [NUM_DMEM_CONSUMERS-1:0] dmem_write_ready;
+    wire [NUM_DMEM_CONSUMERS-1:0] dmem_atomic;
+
+    // Raster writer's memory port and pixel-stream wires.
+    wire rop_write_valid;
+    wire [DATA_MEM_ADDR_BITS-1:0] rop_write_address;
+    wire [DATA_MEM_DATA_BITS-1:0] rop_write_data;
+    wire raster_pixel_valid;
+    wire [7:0] raster_pixel_x;
+    wire [7:0] raster_pixel_y;
+    wire [7:0] raster_pixel_color;
+    wire raster_pixel_ack;
+    wire raster_unit_busy;
+    wire raster_writer_busy;
 
     // Fetcher <> Program Memory Controller Channels (one per warp per core)
     localparam WARPS_PER_CORE = THREADS_PER_BLOCK / THREADS_PER_WARP;
@@ -145,21 +193,21 @@ module gpu #(
     controller #(
         .ADDR_BITS(DATA_MEM_ADDR_BITS),
         .DATA_BITS(DATA_MEM_DATA_BITS),
-        .NUM_CONSUMERS(NUM_LSUS),
+        .NUM_CONSUMERS(NUM_DMEM_CONSUMERS),
         .NUM_CHANNELS(DATA_MEM_NUM_CHANNELS)
     ) data_memory_controller (
         .clk(clk),
         .reset(reset),
 
-        .consumer_read_valid(lsu_read_valid),
-        .consumer_read_address(lsu_read_address),
-        .consumer_read_ready(lsu_read_ready),
-        .consumer_read_data(lsu_read_data),
-        .consumer_write_valid(lsu_write_valid),
-        .consumer_write_address(lsu_write_address),
-        .consumer_write_data(lsu_write_data),
-        .consumer_write_ready(lsu_write_ready),
-        .consumer_atomic(lsu_atomic),
+        .consumer_read_valid(dmem_read_valid),
+        .consumer_read_address(dmem_read_address),
+        .consumer_read_ready(dmem_read_ready),
+        .consumer_read_data(dmem_read_data),
+        .consumer_write_valid(dmem_write_valid),
+        .consumer_write_address(dmem_write_address),
+        .consumer_write_data(dmem_write_data),
+        .consumer_write_ready(dmem_write_ready),
+        .consumer_atomic(dmem_atomic),
 
         .mem_read_valid(l2_up_read_valid),
         .mem_read_address(l2_up_read_address),
@@ -170,6 +218,85 @@ module gpu #(
         .mem_write_data(l2_up_write_data),
         .mem_write_ready(l2_up_write_ready)
     );
+
+    // ---- Consumer bridge: SIMT lanes + raster writer -> controller -------
+    // Slots [0, NUM_LSUS) carry the lanes' LSU traffic unchanged; slot
+    // NUM_LSUS is the raster writer (write-only; its read side is tied off,
+    // and it never participates in atomics).
+    genvar dc;
+    generate
+        for (dc = 0; dc < NUM_LSUS; dc = dc + 1) begin : dmem_bridge
+            assign dmem_read_valid[dc] = lsu_read_valid[dc];
+            assign dmem_read_address[dc] = lsu_read_address[dc];
+            assign dmem_write_valid[dc] = lsu_write_valid[dc];
+            assign dmem_write_address[dc] = lsu_write_address[dc];
+            assign dmem_write_data[dc] = lsu_write_data[dc];
+            assign dmem_atomic[dc] = lsu_atomic[dc];
+            assign lsu_read_ready[dc] = dmem_read_ready[dc];
+            assign lsu_read_data[dc] = dmem_read_data[dc];
+            assign lsu_write_ready[dc] = dmem_write_ready[dc];
+        end
+    endgenerate
+    assign dmem_read_valid[NUM_LSUS] = 1'b0;
+    assign dmem_read_address[NUM_LSUS] = {DATA_MEM_ADDR_BITS{1'b0}};
+    assign dmem_write_valid[NUM_LSUS] = rop_write_valid;
+    assign dmem_write_address[NUM_LSUS] = rop_write_address;
+    assign dmem_write_data[NUM_LSUS] = rop_write_data;
+    assign dmem_atomic[NUM_LSUS] = 1'b0;
+
+    // ---- Fixed-function graphics path -------------------------------------
+    // Host-submitted primitives (point/line/rect/triangle) are walked by the
+    // rasterizer; the raster writer streams the covered pixels into the
+    // framebuffer window of data memory (FB base 64, 8-pixel row stride)
+    // through the shared controller + L2, coherently with the SIMT lanes.
+    rasterizer #(
+        .COORD_BITS(8),
+        .COLOR_BITS(DATA_MEM_DATA_BITS)
+    ) rasterizer_instance (
+        .clk(clk),
+        .reset(reset),
+        .cmd_valid(raster_cmd_valid),
+        .cmd_op(raster_cmd_op),
+        .x0(raster_x0),
+        .y0(raster_y0),
+        .x1(raster_x1),
+        .y1(raster_y1),
+        .x2(raster_x2),
+        .y2(raster_y2),
+        .color(raster_color),
+        .cmd_ready(raster_cmd_ready),
+        .pixel_valid(raster_pixel_valid),
+        .pixel_x(raster_pixel_x),
+        .pixel_y(raster_pixel_y),
+        .pixel_color(raster_pixel_color),
+        .pixel_ack(raster_pixel_ack),
+        .busy(raster_unit_busy),
+        .done(raster_done)
+    );
+
+    raster_writer #(
+        .ADDR_BITS(DATA_MEM_ADDR_BITS),
+        .DATA_BITS(DATA_MEM_DATA_BITS),
+        .COORD_BITS(8),
+        .FB_BASE(64),
+        .FB_WIDTH_LOG2(3)
+    ) raster_writer_instance (
+        .clk(clk),
+        .reset(reset),
+        .pixel_valid(raster_pixel_valid),
+        .pixel_x(raster_pixel_x),
+        .pixel_y(raster_pixel_y),
+        .pixel_color(raster_pixel_color),
+        .pixel_ack(raster_pixel_ack),
+        .mem_write_valid(rop_write_valid),
+        .mem_write_address(rop_write_address),
+        .mem_write_data(rop_write_data),
+        .mem_write_ready(dmem_write_ready[NUM_LSUS]),
+        .busy(raster_writer_busy)
+    );
+
+    // Busy until the primitive walk finishes AND every pixel write commits.
+    assign raster_busy = raster_unit_busy || raster_writer_busy;
 
     // L2 Data Cache (banked write-through with snoop-invalidate)
     // > One bank per data-memory channel; read hits are served on-chip and

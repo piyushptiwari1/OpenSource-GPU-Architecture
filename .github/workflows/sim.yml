@@ -145,6 +145,7 @@ jobs:
           - l2_cache_e2e
           - burst_coalescing_e2e
           - scoreboard_e2e
+          - raster_hw_e2e
           - warp_scheduling_e2e
           - graphics_e2e
           - functional_coverage

@@ -56,6 +56,8 @@ GPU_TOP_SRCS := \
     src/dcr.sv         \
     src/controller.sv  \
     src/l2_cache.sv    \
+    src/rasterizer.sv  \
+    src/raster_writer.sv \
     src/dispatch.sv    \
     src/core.sv        \
     src/fetcher.sv     \
