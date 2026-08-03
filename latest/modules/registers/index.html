@@ -1980,6 +1980,12 @@
 <li>While enabled, it keeps <code>R13</code> synchronized with the current <code>block_id</code>.</li>
 <li>In <code>REQUEST</code>, it snapshots the source registers named by the current instruction into <code>rs</code> and <code>rt</code>.</li>
 <li>In <code>UPDATE</code>, if writeback is enabled and <code>rd &lt; 13</code>, it writes one of three sources into <code>rd</code>.</li>
+<li>Independently of stage and lane enable, the <strong>posted write port</strong>
+   (<code>posted_write_enable</code> / <code>posted_rd_address</code>) commits a scoreboarded
+   load's deferred result from <code>lsu_out</code> \u2014 a posted <code>LDR</code> may land while the
+   warp is executing a different instruction, or after divergence has masked
+   this lane off. WAW hazards are blocked at issue, so this write can never
+   collide with the normal <code>UPDATE</code> write.</li>
 </ol>
 <h2 id="decision-logic-to-focus-on">Decision logic to focus on<a class="headerlink" href="#decision-logic-to-focus-on" title="Permanent link">&para;</a></h2>
 <ul>

@@ -2144,14 +2144,22 @@
     Scheduler --&gt; LSUs
     Decoder[Decoder] --&gt; LSUs</code></pre>
 <h2 id="branching-and-convergence">Branching and convergence<a class="headerlink" href="#branching-and-convergence" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>Update (2026-08):</strong> this section describes the pre-fork design. The
+current <code>src/scheduler.sv</code> implements real branch divergence via per-lane
+PCs with min-PC reconvergence (see <code>docs/modules/scheduler.md</code>); the
+converged-PC assumption, the <code>next_pc[THREADS_PER_BLOCK-1]</code> selection, and
+the partial-block PC caveat below no longer exist in the RTL. The original
+text is preserved as a snapshot.</p>
+</blockquote>
 <p>The design supports <code>CMP</code> and <code>BRnzp</code>, but branch handling is intentionally naive.</p>
-<p>Confirmed from <code>src/scheduler.sv</code>, <code>src/pc.sv</code>, and <code>src/core.sv</code>:</p>
+<p>Confirmed from <code>src/scheduler.sv</code>, <code>src/pc.sv</code>, and <code>src/core.sv</code> (pre-fork):</p>
 <ul>
 <li>each thread computes its own <code>next_pc</code></li>
 <li>the scheduler updates the shared <code>current_pc</code> specifically from <code>next_pc[THREADS_PER_BLOCK-1]</code></li>
 <li>the source contains an explicit TODO around branch divergence</li>
 </ul>
-<p>The practical interpretation is that the current implementation assumes per-block control-flow convergence rather than supporting true branch divergence.</p>
+<p>The practical interpretation is that the pre-fork implementation assumed per-block control-flow convergence rather than supporting true branch divergence.</p>
 <p>There is also a narrower implementation caveat for short final blocks: <code>pc</code> instances are enabled only when <code>i &lt; thread_count</code> in <code>src/core.sv</code>, but the scheduler still takes <code>next_pc[THREADS_PER_BLOCK-1]</code> as the block-wide next PC. In a partial block, that means the shared PC is sourced from the last thread slot even when that slot is not active.</p>
 <h2 id="isa-implementation-notes">ISA implementation notes<a class="headerlink" href="#isa-implementation-notes" title="Permanent link">&para;</a></h2>
 <p><code>src/decoder.sv</code> decodes the following opcode set:</p>

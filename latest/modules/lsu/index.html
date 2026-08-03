@@ -1959,8 +1959,8 @@
     WAITING --&gt; DONE: load completes&lt;br/&gt;capture mem_read_data into lsu_out
     WAITING --&gt; DONE: store completes&lt;br/&gt;write acknowledged
 
-    DONE --&gt; DONE: wait for core UPDATE stage
-    DONE --&gt; IDLE: core_state == UPDATE</code></pre>
+    DONE --&gt; DONE: wait for release
+    DONE --&gt; IDLE: op_release&lt;br/&gt;(owning instruction's UPDATE for synchronous ops,&lt;br/&gt;scoreboard ack for posted ops)</code></pre>
 <h2 id="behavior-walkthrough">Behavior walkthrough<a class="headerlink" href="#behavior-walkthrough" title="Permanent link">&para;</a></h2>
 <ol>
 <li>The decoder chooses whether this instruction is a load or store.</li>
@@ -1970,7 +1970,11 @@
 <li>write address + write data (<code>STR</code>)</li>
 <li>In <code>WAITING</code>, it waits for the controller/memory to acknowledge completion.</li>
 <li>For a load, it captures returned data into <code>lsu_out</code>.</li>
-<li>In <code>DONE</code>, it waits until <code>UPDATE</code> before resetting back to <code>IDLE</code>.</li>
+<li>In <code>DONE</code>, it waits for <code>op_release</code> before resetting back to <code>IDLE</code>. For
+   synchronous ops (atomics, shared memory) the core pulses release at the
+   owning instruction's <code>UPDATE</code>; for POSTED plain loads/stores the release
+   is the scoreboard's completion ack, which may arrive many instructions
+   later while the warp has already moved on.</li>
 </ol>
 <h2 id="state-machine-idea">State machine idea<a class="headerlink" href="#state-machine-idea" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1982,9 +1986,9 @@
 <p>The same FSM is reused for both loads and stores; only the handshake signals differ.</p>
 <h2 id="timing-notes">Timing notes<a class="headerlink" href="#timing-notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li>This module is the reason the scheduler must sometimes stall in <code>WAIT</code></li>
-<li><code>lsu_out</code> is only meaningful after a load has completed</li>
-<li>Returning to <code>IDLE</code> in <code>UPDATE</code> keeps the per-instruction rhythm aligned with the rest of the core</li>
+<li>Atomics and shared-memory ops are the reason the scheduler sometimes stalls in <code>WAIT</code>; plain LDR/STR are posted through the scoreboard instead and overlap with continued execution</li>
+<li><code>lsu_out</code> is only meaningful after a load has completed (for a posted load, the register write happens at the scoreboard ack, not in the issuing instruction's <code>UPDATE</code>)</li>
+<li>The <code>op_release</code> handshake keeps the FSM aligned with whichever engine owns the op's completion</li>
 </ul>
 <h2 id="common-pitfalls">Common pitfalls<a class="headerlink" href="#common-pitfalls" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1996,10 +2000,10 @@
 <p>For <code>LDR R4, R4</code>:</p>
 <ol>
 <li>Register file has already copied <code>R4</code> into <code>rs</code></li>
-<li>LSU enters <code>REQUESTING</code> and drives <code>mem_read_address = rs</code></li>
-<li>It waits in <code>WAITING</code></li>
+<li>LSU enters <code>REQUESTING</code> and drives <code>mem_read_address = rs</code>; the warp POSTS the load and keeps executing</li>
+<li>It waits in <code>WAITING</code> while independent later instructions run</li>
 <li>When <code>mem_read_ready</code> is asserted, it stores <code>mem_read_data</code> into <code>lsu_out</code></li>
-<li>In <code>UPDATE</code>, the register file writes <code>lsu_out</code> into <code>R4</code></li>
+<li>On the scoreboard ack, the register file's posted write port commits <code>lsu_out</code> into <code>R4</code> and <code>op_release</code> returns the LSU to <code>IDLE</code></li>
 </ol>
 <h2 id="read-next">Read next<a class="headerlink" href="#read-next" title="Permanent link">&para;</a></h2>
 <ul>

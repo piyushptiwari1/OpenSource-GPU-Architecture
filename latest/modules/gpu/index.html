@@ -2052,20 +2052,24 @@
 <ul>
 <li>launch configuration (<code>dcr</code>)</li>
 <li>block assignment (<code>dispatch</code>)</li>
-<li>memory arbitration (<code>controller</code>)</li>
-<li>actual execution (<code>core</code> instances)</li>
+<li>memory arbitration (<code>controller</code>, one for data and one for program memory)</li>
+<li>the L2 data cache (<code>l2_cache</code>, between the data controller and the external pins)</li>
+<li>actual execution (<code>core</code> instances, each containing one or more warp slices)</li>
+<li>the fixed-function graphics path (<code>rasterizer</code> + <code>raster_writer</code>)</li>
+<li>warp-level same-address read coalescing and the top-level performance counters</li>
 </ul>
-<p>This matches the DeepWiki architecture pages, where the GPU module is described as the wrapper around cores, memory controllers, and dispatch logic.</p>
+<p>This matches the DeepWiki architecture pages, where the GPU module is described as the wrapper around cores, memory controllers, and dispatch logic — extended in this fork with the cache hierarchy and the fixed-function engine.</p>
 <h2 id="where-it-sits-in-tiny-gpu">Where it sits in tiny-gpu<a class="headerlink" href="#where-it-sits-in-tiny-gpu" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Upstream:</strong> host/testbench drives <code>start</code>, <code>device_control_write_enable</code>, and the external memory interfaces</li>
+<li><strong>Upstream:</strong> host/testbench drives <code>start</code>, <code>device_control_write_enable</code>, the <code>raster_*</code> command ports, and the external memory interfaces</li>
 <li><strong>Inside the GPU:</strong></li>
 <li>one <code>dcr</code></li>
-<li>one data-memory controller</li>
+<li>one data-memory controller feeding the banked <code>l2_cache</code></li>
 <li>one program-memory controller</li>
 <li>one <code>dispatch</code></li>
-<li><code>NUM_CORES</code> compute cores</li>
-<li><strong>Downstream:</strong> external data/program memory ports and the host-visible <code>done</code></li>
+<li><code>NUM_CORES</code> compute cores (each with <code>THREADS_PER_BLOCK / THREADS_PER_WARP</code> warp slices)</li>
+<li>one <code>rasterizer</code> + <code>raster_writer</code> (fixed-function graphics)</li>
+<li><strong>Downstream:</strong> external data/program memory ports, the host-visible <code>done</code>, <code>raster_busy</code>/<code>raster_done</code>, and the aggregated <code>perf_*</code> counters</li>
 </ul>
 <h2 id="clockreset-and-when-work-happens">Clock/reset and when work happens<a class="headerlink" href="#clockreset-and-when-work-happens" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2094,24 +2098,32 @@
 <td>host writes launch metadata into the DCR</td>
 </tr>
 <tr>
+<td><code>raster_*</code></td>
+<td>host submits fixed-function primitives; busy/done report render + write-back completion</td>
+</tr>
+<tr>
 <td><code>program_mem_*</code></td>
-<td>external program memory interface</td>
+<td>external program memory interface (one channel per warp slice, misses only)</td>
 </tr>
 <tr>
 <td><code>data_mem_*</code></td>
-<td>external data memory interface</td>
+<td>external data memory interface (only L2 line-fill bursts and write-throughs)</td>
+</tr>
+<tr>
+<td><code>perf_*</code></td>
+<td>aggregated counters: cycles, instrs, divergence, barriers, coalesced reads, icache hits/misses, L2 hits/misses, posted ops</td>
 </tr>
 <tr>
 <td><code>core_*</code> arrays</td>
 <td>dispatcher-managed per-core launch/status signals</td>
 </tr>
 <tr>
-<td><code>lsu_*</code> arrays</td>
-<td>flattened all-core/all-thread data-memory traffic</td>
+<td><code>lsu_*</code> / <code>dmem_*</code> arrays</td>
+<td>flattened all-core/all-thread data-memory traffic plus the raster writer's consumer slot</td>
 </tr>
 <tr>
 <td><code>fetcher_*</code> arrays</td>
-<td>per-core instruction-fetch traffic</td>
+<td>per-warp-slice instruction-fetch traffic</td>
 </tr>
 </tbody>
 </table>
@@ -2133,10 +2145,14 @@
 
     CORE0 --&gt; LSU0["lane LSU traffic"]
     CORE1 --&gt; LSU1["lane LSU traffic"]
-    LSU0 --&gt; FLAT["flatten all core and lane LSU ports"]
-    LSU1 --&gt; FLAT
+    LSU0 --&gt; COAL["warp-level same-address read coalescing"]
+    LSU1 --&gt; COAL
+    COAL --&gt; FLAT["flatten lanes + raster writer into consumer slots"]
+    RAST["rasterizer + raster_writer"] --&gt; FLAT
+    HOST --&gt; RAST
     FLAT --&gt; DMCTRL["data memory controller"]
-    DMCTRL --&gt; DMEM["external data memory"]
+    DMCTRL --&gt; L2["l2_cache (banked, write-through)"]
+    L2 --&gt; DMEM["external data memory"]
 
     CORE0 --&gt; DONE0["core_done"]
     CORE1 --&gt; DONE1["core_done"]
@@ -2176,18 +2192,20 @@
 </ul>
 <p>where:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>NUM_LSUS = NUM_CORES * THREADS_PER_BLOCK
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>NUM_DMEM_CONSUMERS = NUM_LSUS + 1   // +1: the raster writer&#39;s slot
 </span></code></pre></div>
 <p>Then it bridges each core-local lane into a unique global LSU index:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>lsu_index = i * THREADS_PER_BLOCK + j
 </span></code></pre></div>
-<p>That indexing rule is one of the most important things to understand in this file.</p>
+<p>That indexing rule is one of the most important things to understand in this file. The final consumer slot (<code>NUM_LSUS</code>) belongs to the raster writer: write-only, never atomic — which is how the fixed-function engine shares the controller and L2 with the SIMT lanes coherently.</p>
 <h2 id="one-instance-modules-vs-replicated-modules">One-instance modules vs replicated modules<a class="headerlink" href="#one-instance-modules-vs-replicated-modules" title="Permanent link">&para;</a></h2>
 <h3 id="single-gpu-wide-instances">Single GPU-wide instances<a class="headerlink" href="#single-gpu-wide-instances" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>dcr</code></li>
 <li><code>dispatch</code></li>
-<li>one data-memory controller</li>
+<li>one data-memory controller + one banked <code>l2_cache</code> below it</li>
 <li>one program-memory controller</li>
+<li>one <code>rasterizer</code> + <code>raster_writer</code></li>
 </ul>
 <p>These exist once because they coordinate global behavior.</p>
 <h3 id="repeated-per-core-instances">Repeated per-core instances<a class="headerlink" href="#repeated-per-core-instances" title="Permanent link">&para;</a></h3>
