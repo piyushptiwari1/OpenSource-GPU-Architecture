@@ -80,7 +80,7 @@ jobs:
 
       - name: Upload synth log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: synth-check-log
           path: |
@@ -121,7 +121,7 @@ jobs:
           make -C ${{ matrix.make_dir }} all
 
       - name: Upload artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fpga-${{ matrix.target }}
           path: |
