@@ -12,6 +12,14 @@ This set is grounded in:
 - the actual RTL in `src/*.sv`
 - the repo's DeepWiki architecture pages (`Overview`, `Architecture Overview`, `Execution Model`, `Hardware Modules`, `Memory System`)
 
+> **Fork note:** this fork extends the machine beyond these per-module notes.
+> The L2 data cache (`src/l2_cache.sv`), the fixed-function graphics path
+> (`src/rasterizer.sv` + `src/raster_writer.sv`), the per-warp-slice L1
+> instruction cache (`src/icache.sv`), and the scoreboard's posted memory
+> operations are described in [`gpu.md`](./gpu.md), [`core.md`](./core.md),
+> [`scheduler.md`](./scheduler.md), and the top-level `README.md` /
+> `CHANGES.md` feature tables.
+
 ## Recommended reading order
 
 1. [`scheduler.md`](./scheduler.md) — the global per-instruction rhythm of a core

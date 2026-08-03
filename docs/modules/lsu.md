@@ -44,8 +44,8 @@ stateDiagram-v2
     WAITING --> DONE: load completes<br/>capture mem_read_data into lsu_out
     WAITING --> DONE: store completes<br/>write acknowledged
 
-    DONE --> DONE: wait for core UPDATE stage
-    DONE --> IDLE: core_state == UPDATE
+    DONE --> DONE: wait for release
+    DONE --> IDLE: op_release<br/>(owning instruction's UPDATE for synchronous ops,<br/>scoreboard ack for posted ops)
 ```
 
 ## Behavior walkthrough
@@ -57,7 +57,11 @@ stateDiagram-v2
    - write address + write data (`STR`)
 4. In `WAITING`, it waits for the controller/memory to acknowledge completion.
 5. For a load, it captures returned data into `lsu_out`.
-6. In `DONE`, it waits until `UPDATE` before resetting back to `IDLE`.
+6. In `DONE`, it waits for `op_release` before resetting back to `IDLE`. For
+   synchronous ops (atomics, shared memory) the core pulses release at the
+   owning instruction's `UPDATE`; for POSTED plain loads/stores the release
+   is the scoreboard's completion ack, which may arrive many instructions
+   later while the warp has already moved on.
 
 ## State machine idea
 
@@ -70,9 +74,9 @@ The same FSM is reused for both loads and stores; only the handshake signals dif
 
 ## Timing notes
 
-- This module is the reason the scheduler must sometimes stall in `WAIT`
-- `lsu_out` is only meaningful after a load has completed
-- Returning to `IDLE` in `UPDATE` keeps the per-instruction rhythm aligned with the rest of the core
+- Atomics and shared-memory ops are the reason the scheduler sometimes stalls in `WAIT`; plain LDR/STR are posted through the scoreboard instead and overlap with continued execution
+- `lsu_out` is only meaningful after a load has completed (for a posted load, the register write happens at the scoreboard ack, not in the issuing instruction's `UPDATE`)
+- The `op_release` handshake keeps the FSM aligned with whichever engine owns the op's completion
 
 ## Common pitfalls
 
@@ -85,10 +89,10 @@ The same FSM is reused for both loads and stores; only the handshake signals dif
 For `LDR R4, R4`:
 
 1. Register file has already copied `R4` into `rs`
-2. LSU enters `REQUESTING` and drives `mem_read_address = rs`
-3. It waits in `WAITING`
+2. LSU enters `REQUESTING` and drives `mem_read_address = rs`; the warp POSTS the load and keeps executing
+3. It waits in `WAITING` while independent later instructions run
 4. When `mem_read_ready` is asserted, it stores `mem_read_data` into `lsu_out`
-5. In `UPDATE`, the register file writes `lsu_out` into `R4`
+5. On the scoreboard ack, the register file's posted write port commits `lsu_out` into `R4` and `op_release` returns the LSU to `IDLE`
 
 ## Read next
 

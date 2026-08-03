@@ -67,6 +67,12 @@ flowchart TD
 3. While enabled, it keeps `R13` synchronized with the current `block_id`.
 4. In `REQUEST`, it snapshots the source registers named by the current instruction into `rs` and `rt`.
 5. In `UPDATE`, if writeback is enabled and `rd < 13`, it writes one of three sources into `rd`.
+6. Independently of stage and lane enable, the **posted write port**
+   (`posted_write_enable` / `posted_rd_address`) commits a scoreboarded
+   load's deferred result from `lsu_out` \u2014 a posted `LDR` may land while the
+   warp is executing a different instruction, or after divergence has masked
+   this lane off. WAW hazards are blocked at issue, so this write can never
+   collide with the normal `UPDATE` write.
 
 ## Decision logic to focus on
 

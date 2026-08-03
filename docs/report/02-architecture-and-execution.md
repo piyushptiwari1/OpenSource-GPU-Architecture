@@ -158,15 +158,22 @@ flowchart TD
 
 ## Branching and convergence
 
+> **Update (2026-08):** this section describes the pre-fork design. The
+> current `src/scheduler.sv` implements real branch divergence via per-lane
+> PCs with min-PC reconvergence (see `docs/modules/scheduler.md`); the
+> converged-PC assumption, the `next_pc[THREADS_PER_BLOCK-1]` selection, and
+> the partial-block PC caveat below no longer exist in the RTL. The original
+> text is preserved as a snapshot.
+
 The design supports `CMP` and `BRnzp`, but branch handling is intentionally naive.
 
-Confirmed from `src/scheduler.sv`, `src/pc.sv`, and `src/core.sv`:
+Confirmed from `src/scheduler.sv`, `src/pc.sv`, and `src/core.sv` (pre-fork):
 
 - each thread computes its own `next_pc`
 - the scheduler updates the shared `current_pc` specifically from `next_pc[THREADS_PER_BLOCK-1]`
 - the source contains an explicit TODO around branch divergence
 
-The practical interpretation is that the current implementation assumes per-block control-flow convergence rather than supporting true branch divergence.
+The practical interpretation is that the pre-fork implementation assumed per-block control-flow convergence rather than supporting true branch divergence.
 
 There is also a narrower implementation caveat for short final blocks: `pc` instances are enabled only when `i < thread_count` in `src/core.sv`, but the scheduler still takes `next_pc[THREADS_PER_BLOCK-1]` as the block-wide next PC. In a partial block, that means the shared PC is sourced from the last thread slot even when that slot is not active.
 

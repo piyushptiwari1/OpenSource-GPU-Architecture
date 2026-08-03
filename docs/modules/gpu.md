@@ -14,21 +14,25 @@ It ties together:
 
 - launch configuration (`dcr`)
 - block assignment (`dispatch`)
-- memory arbitration (`controller`)
-- actual execution (`core` instances)
+- memory arbitration (`controller`, one for data and one for program memory)
+- the L2 data cache (`l2_cache`, between the data controller and the external pins)
+- actual execution (`core` instances, each containing one or more warp slices)
+- the fixed-function graphics path (`rasterizer` + `raster_writer`)
+- warp-level same-address read coalescing and the top-level performance counters
 
-This matches the DeepWiki architecture pages, where the GPU module is described as the wrapper around cores, memory controllers, and dispatch logic.
+This matches the DeepWiki architecture pages, where the GPU module is described as the wrapper around cores, memory controllers, and dispatch logic — extended in this fork with the cache hierarchy and the fixed-function engine.
 
 ## Where it sits in tiny-gpu
 
-- **Upstream:** host/testbench drives `start`, `device_control_write_enable`, and the external memory interfaces
+- **Upstream:** host/testbench drives `start`, `device_control_write_enable`, the `raster_*` command ports, and the external memory interfaces
 - **Inside the GPU:**
   - one `dcr`
-  - one data-memory controller
+  - one data-memory controller feeding the banked `l2_cache`
   - one program-memory controller
   - one `dispatch`
-  - `NUM_CORES` compute cores
-- **Downstream:** external data/program memory ports and the host-visible `done`
+  - `NUM_CORES` compute cores (each with `THREADS_PER_BLOCK / THREADS_PER_WARP` warp slices)
+  - one `rasterizer` + `raster_writer` (fixed-function graphics)
+- **Downstream:** external data/program memory ports, the host-visible `done`, `raster_busy`/`raster_done`, and the aggregated `perf_*` counters
 
 ## Clock/reset and when work happens
 
@@ -45,11 +49,13 @@ This matches the DeepWiki architecture pages, where the GPU module is described 
 |---|---|
 | `start`, `done` | top-level kernel launch and completion |
 | `device_control_*` | host writes launch metadata into the DCR |
-| `program_mem_*` | external program memory interface |
-| `data_mem_*` | external data memory interface |
+| `raster_*` | host submits fixed-function primitives; busy/done report render + write-back completion |
+| `program_mem_*` | external program memory interface (one channel per warp slice, misses only) |
+| `data_mem_*` | external data memory interface (only L2 line-fill bursts and write-throughs) |
+| `perf_*` | aggregated counters: cycles, instrs, divergence, barriers, coalesced reads, icache hits/misses, L2 hits/misses, posted ops |
 | `core_*` arrays | dispatcher-managed per-core launch/status signals |
-| `lsu_*` arrays | flattened all-core/all-thread data-memory traffic |
-| `fetcher_*` arrays | per-core instruction-fetch traffic |
+| `lsu_*` / `dmem_*` arrays | flattened all-core/all-thread data-memory traffic plus the raster writer's consumer slot |
+| `fetcher_*` arrays | per-warp-slice instruction-fetch traffic |
 
 ## Diagram
 
@@ -71,10 +77,14 @@ flowchart TD
 
     CORE0 --> LSU0["lane LSU traffic"]
     CORE1 --> LSU1["lane LSU traffic"]
-    LSU0 --> FLAT["flatten all core and lane LSU ports"]
-    LSU1 --> FLAT
+    LSU0 --> COAL["warp-level same-address read coalescing"]
+    LSU1 --> COAL
+    COAL --> FLAT["flatten lanes + raster writer into consumer slots"]
+    RAST["rasterizer + raster_writer"] --> FLAT
+    HOST --> RAST
     FLAT --> DMCTRL["data memory controller"]
-    DMCTRL --> DMEM["external data memory"]
+    DMCTRL --> L2["l2_cache (banked, write-through)"]
+    L2 --> DMEM["external data memory"]
 
     CORE0 --> DONE0["core_done"]
     CORE1 --> DONE1["core_done"]
@@ -122,6 +132,7 @@ where:
 
 ```text
 NUM_LSUS = NUM_CORES * THREADS_PER_BLOCK
+NUM_DMEM_CONSUMERS = NUM_LSUS + 1   // +1: the raster writer's slot
 ```
 
 Then it bridges each core-local lane into a unique global LSU index:
@@ -130,7 +141,7 @@ Then it bridges each core-local lane into a unique global LSU index:
 lsu_index = i * THREADS_PER_BLOCK + j
 ```
 
-That indexing rule is one of the most important things to understand in this file.
+That indexing rule is one of the most important things to understand in this file. The final consumer slot (`NUM_LSUS`) belongs to the raster writer: write-only, never atomic — which is how the fixed-function engine shares the controller and L2 with the SIMT lanes coherently.
 
 ## One-instance modules vs replicated modules
 
@@ -138,8 +149,9 @@ That indexing rule is one of the most important things to understand in this fil
 
 - `dcr`
 - `dispatch`
-- one data-memory controller
+- one data-memory controller + one banked `l2_cache` below it
 - one program-memory controller
+- one `rasterizer` + `raster_writer`
 
 These exist once because they coordinate global behavior.
 
